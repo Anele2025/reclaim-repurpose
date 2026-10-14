@@ -1,0 +1,2 @@
+TransactionID,RecordStatus,TransactionDate,CountryCode,SiteRecordID,CollectionID,TransactionType,Category,Description,Amount,CurrencyCode,TaxTreatmentStatus,CounterpartyRecordID,InvoiceOrReceiptRef,PaymentStatus,PaymentDate,RecordedBy,Notes
+TEST-FIN-001,TEST_DATA,2026-10-05,BW,TEST-CUS-001,TEST-COL-001,COST,Transport,FICTIONAL TEST TRANSPORT COST,100.00,BWP,NOT_ASSESSED,,TEST-ONLY,PENDING,,Example operator,Fictional amount for testing only; not a quote or actual transaction

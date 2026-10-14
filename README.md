@@ -44,15 +44,19 @@ No pilot results should be reported until they have actually been collected and 
 
 This repository will hold the project's documentation, operating templates, and—when the requirements are validated—digital tools to support operations and impact reporting. The software should serve the real service model, not substitute for validating it.
 
-Planned documentation may include:
+### Operational record templates
 
-- Organizational profile and service descriptions
-- Pilot plan and risk checklist
-- Material collection and handover register
-- Partner and customer records
-- Cost and revenue tracker
-- Impact reporting template
-- Product requirements, technical design, and implementation notes
+The Stage 1 spreadsheet-ready CSV templates and field definitions are available:
+
+- [Operational records guide](docs/operations/RECORDS_GUIDE.md) — field definitions, controlled values, relationships, validation, monthly reconciliation, and country-specific launch cautions.
+- [Customers and collection sites](templates/operations/customers_sites.csv)
+- [Recovery partners and destination verification](templates/operations/recovery_partners.csv)
+- [Collection visits](templates/operations/collections.csv)
+- [Material lifecycle events and handovers](templates/operations/material_events.csv)
+- [Operating costs and revenue](templates/operations/finance_ledger.csv)
+- [Monthly impact reporting](templates/operations/monthly_impact.csv)
+
+All included rows are fictional test data. These are repository CSV files, not a Google Sheets workbook or an operational database. The templates do not themselves enforce access control, foreign keys, or audit logging.
 
 ## Roadmap
 
@@ -60,7 +64,7 @@ Planned documentation may include:
 - [ ] Interview prospective customers and recovery partners.
 - [ ] Verify material acceptance criteria, local requirements, and operating costs.
 - [ ] Prepare the pilot plan, responsibilities, and safety checklist.
-- [ ] Create simple record-keeping templates.
+- [x] Draft spreadsheet-ready operational record templates and a field/validation guide (Stage 1; test data only).
 - [ ] Run and evaluate a small pilot before building unnecessary automation.
 - [ ] Specify and implement digital tools based on evidence from the pilot.
 

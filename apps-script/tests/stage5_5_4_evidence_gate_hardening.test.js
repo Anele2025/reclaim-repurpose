@@ -172,7 +172,7 @@ test("FAIL requires an execution record and consistent aggregate status", () => 
   value.evidenceAssessmentStatus = "FAIL";
   assert.equal(validateManifest(value).evidenceAssessmentStatus, "FAIL");
   value.cases[0].evidenceRef = null;
-  assert.throws(() => validateManifest(value), /FAIL requires timestamp/);
+  assert.throws(() => validateManifest(value), /evidenceRef must be a sanitized relative repository artifact path/);
 });
 
 test("live evidence awaiting independent review is distinct from a passed case", () => {

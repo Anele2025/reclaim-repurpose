@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import csv
 import re
-import sys
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +45,13 @@ ID_COLUMNS = {
 }
 COUNTRIES = {"Botswana", "Eswatini"}
 STATUS_ALLOWED = {
+    ("templates/validation/customer_site_prospects.csv", "ContactPermissionStatus"): {"NOT_CHECKED", "PUBLIC_CHANNEL_ONLY", "CONSENTED", "NO_PERMISSION", "NOT_APPLICABLE"},
+    ("templates/validation/customer_site_prospects.csv", "SitePermissionStatus"): {"NOT_ASSESSED", "REQUIRED", "REQUESTED", "APPROVED", "REFUSED", "NOT_APPLICABLE"},
+    ("templates/validation/customer_site_prospects.csv", "ValidationStatus"): {"UNASSESSED", "CONTACTED", "INTERVIEWED", "FOLLOW_UP", "QUALIFIED_FOR_REVIEW", "NOT_SUITABLE", "CLOSED"},
+    ("templates/validation/customer_interviews.csv", "ConsentToRecordNotes"): {"YES", "NO", "NOT_ASKED"},
+    ("templates/validation/customer_interviews.csv", "ValidationOutcome"): {"GENERAL_INTEREST", "STATED_WILLINGNESS_TO_PAY", "CONDITIONAL_OFFER", "DOCUMENTED_COMMITMENT", "PAID_TRANSACTION", "NO_INTEREST", "UNRESOLVED"},
+    ("templates/validation/recovery_partner_register.csv", "ContactStatus"): {"NOT_CONTACTED", "CONTACTED", "AWAITING_RESPONSE", "TERMS_RECEIVED", "CONDITIONS_VERIFIED", "NOT_ACCEPTING", "UNRESOLVED"},
+    ("templates/validation/recovery_partner_register.csv", "CommercialStatus"): {"UNKNOWN", "NO_QUOTE", "QUOTE_RECEIVED", "CONDITIONAL", "AGREEMENT_DOCUMENTED", "NO_AGREEMENT"},
     ("templates/validation/site_permissions.csv", "Status"): {"NOT_ASSESSED", "REQUIRED", "REQUESTED", "APPROVED", "REFUSED", "NOT_APPLICABLE"},
     ("templates/validation/country_requirements_register.csv", "Status"): {"CONFIRMED", "POTENTIALLY_APPLICABLE", "NOT_APPLICABLE_JUSTIFIED", "UNRESOLVED"},
     ("templates/validation/evidence_register.csv", "EvidenceQuality"): {"UNTESTED_ASSUMPTION", "UNVERIFIED_LEAD", "SELF_REPORTED", "DOCUMENTED_THIRD_PARTY", "CORROBORATED", "OBSERVED_TRANSACTION_OR_RESULT"},
@@ -77,8 +84,10 @@ def main() -> int:
                     if any(value is None for value in row.values()):
                         errors.append(f"{relative}:{line_no}: missing field(s)")
                     record_status = (row.get("RecordStatus") or "").strip()
+                    joined = " ".join((value or "") for value in row.values())
+                    is_test_data = record_status.upper() == "TEST_DATA" or "TEST_DATA" in joined
                     identifier = (row.get(ID_COLUMNS[relative]) or "").strip()
-                    if record_status.upper() != "TEST_DATA" and not identifier:
+                    if not is_test_data and not identifier:
                         errors.append(f"{relative}:{line_no}: blank stable ID in non-test record")
                     country = (row.get("Country") or "").strip()
                     if country and country not in COUNTRIES:

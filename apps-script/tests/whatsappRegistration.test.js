@@ -19,20 +19,31 @@ function fixture(options = {}) {
     eventStore: {
       begin(id, digest, org) {
         const previous = state.events.get(org + "|" + id);
-        if (!previous) { state.events.set(org + "|" + id, { digest, org, status: "PROCESSING" }); return { status: "NEW" }; }
+        if (!previous) { const claimToken = "claim-" + (++state.nextId); state.events.set(org + "|" + id, { digest, org, status: "PROCESSING", claimToken }); return { status: "NEW", claimToken }; }
         if (previous.digest !== digest || previous.org !== org) return { status: "CONFLICT" };
         if (previous.status === "COMPLETE") return { status: "REPLAY", result: previous.result };
+        if (previous.status === "RETRYABLE") { const claimToken = "claim-" + (++state.nextId); previous.claimToken = claimToken; previous.status = "PROCESSING"; return { status: "NEW", claimToken }; }
         return { status: "IN_PROGRESS" };
       },
-      complete(id, digest, org, result) {
+      linkRegistration(id, digest, org, claimToken, request) {
+        const previous = state.events.get(org + "|" + id);
+        if (!previous || previous.digest !== digest || previous.status !== "PROCESSING" || previous.claimToken !== claimToken) throw new Error("STALE_CLAIM_TOKEN");
+        const fingerprint = JSON.stringify(request);
+        if (previous.registrationFingerprint && previous.registrationFingerprint !== fingerprint) throw new Error("REGISTRATION_LINK_CONFLICT");
+        previous.registrationId = request.registrationId; previous.operationId = request.operationId; previous.registrationFingerprint = fingerprint;
+        return { ok: true, durable: true };
+      },
+      complete(id, digest, org, claimToken, result) {
         if (options.failComplete) throw new Error("completion unavailable");
         const key = org + "|" + id, previous = state.events.get(key);
-        if (!previous || previous.digest !== digest || previous.status !== "PROCESSING") throw new Error("claim mismatch");
-        state.events.set(key, { digest, org, status: "COMPLETE", result });
+        if (!previous || previous.digest !== digest || previous.status !== "PROCESSING" || previous.claimToken !== claimToken) throw new Error("STALE_CLAIM_TOKEN");
+        state.events.set(key, { digest, org, status: "COMPLETE", result, claimToken });
+        return { ok: true };
       },
-      release(id, digest, org) {
+      release(id, digest, org, claimToken) {
         const key = org + "|" + id, previous = state.events.get(key);
-        if (previous && previous.digest === digest && previous.status === "PROCESSING") state.events.delete(key);
+        if (!previous || previous.digest !== digest || previous.claimToken !== claimToken) throw new Error("STALE_CLAIM_TOKEN");
+        if (previous.status === "PROCESSING") { previous.status = "RETRYABLE"; previous.claimToken = ""; }
       }
     },
     sessionStore: {

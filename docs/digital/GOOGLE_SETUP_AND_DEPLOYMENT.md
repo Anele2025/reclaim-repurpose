@@ -210,3 +210,14 @@ Reconciliation does not infer a successful registration solely from an event bei
 7. Keep deployment disabled until provider-specific request authentication, stable claim fencing, idempotent persistence, and recovery behavior have passed independent review.
 
 A passing CI run verifies the synthetic adapter contract and package only. It does not prove real Google permissions, Sheets write behavior, quotas, deployment identity, or production readiness.
+
+
+## Stage 5.12 — claim-token fencing and linked-registration recovery
+
+**Status: implementation committed on the Stage 5.12 branch; automated CI and live Google integration must be checked separately.** The Events schema is now version 2 and adds an explicit `organizationId`, `registrationId`, `operationId`, and canonical registration fingerprint. Existing version 1 workbooks will fail schema validation; no automatic migration is implemented. Use only a disposable synthetic workbook for any future schema experiment.
+
+The event lifecycle contract now requires the claim token returned by `begin` to be supplied to `complete`, `release`, and `linkRegistration`. The adapter compares the supplied token with the persisted claim while holding its ScriptLock. A stale/missing token returns a machine-readable error (`STALE_CLAIM_TOKEN`) and cannot change the current claim through this adapter. Apps Script `Utilities.getUuid()` is the default token source when no injected generator is supplied; tests inject a deterministic generator.
+
+Before registration persistence is called, the workflow persists the intended registration ID, operation ID, and canonical payload fingerprint in the event row, then re-reads and verifies that linkage. Reuse with a different payload is rejected. If an expired event claim has a linkage to exactly one successful registration row with matching identifiers and fingerprint, bounded reconciliation may mark the event complete and clear the claim token. Missing or contradictory records are quarantined for manual review. Reconciliation never deletes registrations or sends WhatsApp messages.
+
+These safeguards apply only to cooperating code using this adapter and its ScriptLock. Google Sheets still has no multi-row transaction; manual spreadsheet edits, other projects/writers, process pauses, quotas, and ambiguous writes remain risks. This is not an exactly-once messaging guarantee. Stage 5.12 does not select a WhatsApp provider, create a public webhook, connect to a real spreadsheet, or deploy Apps Script.

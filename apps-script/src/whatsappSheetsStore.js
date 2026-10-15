@@ -7,10 +7,10 @@
  */
 var ReclaimWhatsAppSheetsStore = (function () {
   "use strict";
-  var VERSION = 1;
+  var VERSION = 2;
   var DEFAULT_BATCH_LIMIT = 50;
   var HEADERS = {
-    Events: ["schemaVersion", "scopeKey", "eventId", "digest", "status", "claimToken", "claimedAt", "leaseExpiresAt", "attempts", "createdAt", "updatedAt", "completedAt", "resultJson", "lastErrorCode"],
+    Events: ["schemaVersion", "scopeKey", "organizationId", "eventId", "digest", "status", "claimToken", "claimedAt", "leaseExpiresAt", "attempts", "createdAt", "updatedAt", "completedAt", "resultJson", "lastErrorCode", "registrationId", "operationId", "registrationFingerprint"],
     Sessions: ["schemaVersion", "scopeKey", "organizationId", "senderKey", "sessionJson", "updatedAt", "expiresAt"],
     Registrations: ["schemaVersion", "organizationId", "registrationId", "operationId", "payloadFingerprint", "payloadJson", "status", "createdAt", "updatedAt"],
     Audit: ["schemaVersion", "occurredAt", "kind", "organizationId", "recordKey", "outcome", "diagnosticCode"]
@@ -50,6 +50,12 @@ var ReclaimWhatsAppSheetsStore = (function () {
       var result = typeof value === "number" ? value : Date.parse(value);
       if (!isFinite(result)) fail("CLOCK_UNAVAILABLE");
       return result;
+    }
+    function newClaimToken() {
+      var token = typeof deps.idGenerator === "function" ? deps.idGenerator("claim") :
+        (typeof Utilities !== "undefined" && typeof Utilities.getUuid === "function" ? Utilities.getUuid() : "");
+      if (!nonempty(String(token || ""), 256)) fail("CLAIM_TOKEN_UNAVAILABLE");
+      return String(token);
     }
     function withLock(callback) {
       if (lockDepth > 0) {
@@ -138,8 +144,9 @@ var ReclaimWhatsAppSheetsStore = (function () {
                 audit("EVENT", organizationId, eventId, "MANUAL_REVIEW", "LEASE_EXPIRED_REVIEW_REQUIRED");
                 return { status: "UNAVAILABLE", code: "RECONCILIATION_REQUIRED" };
               }
-              if (existing.status === "RECONCILIATION_REQUIRED" || !["RETRYABLE"].includes(existing.status)) return { status: "UNAVAILABLE" };
-              var token = String(deps.idGenerator ? deps.idGenerator("claim") : stamp + "-" + Math.random());
+              if (existing.status === "RECONCILIATION_REQUIRED") return { status: "UNAVAILABLE", code: "RECONCILIATION_REQUIRED" };
+              if (!["RETRYABLE"].includes(existing.status)) return { status: "UNAVAILABLE", code: "EVENT_STATE_UNAVAILABLE" };
+              var token = newClaimToken();
               existing.status = "PROCESSING"; existing.claimToken = token; existing.claimedAt = stamp;
               existing.leaseExpiresAt = stamp + leaseMs; existing.attempts = Number(existing.attempts || 0) + 1;
               existing.updatedAt = stamp; existing.lastErrorCode = "";
@@ -147,8 +154,8 @@ var ReclaimWhatsAppSheetsStore = (function () {
               audit("EVENT", organizationId, eventId, "RECOVERED_CLAIM", "");
               return { status: "NEW", claimToken: token };
             }
-            var claimToken = String(deps.idGenerator ? deps.idGenerator("claim") : stamp + "-" + Math.random());
-            write("Events", 0, { schemaVersion: VERSION, scopeKey: scope(organizationId, accountScope),
+            var claimToken = newClaimToken();
+            write("Events", 0, { schemaVersion: VERSION, scopeKey: scope(organizationId, accountScope), organizationId: organizationId,
               eventId: eventId, digest: digest, status: "PROCESSING", claimToken: claimToken,
               claimedAt: stamp, leaseExpiresAt: stamp + leaseMs, attempts: 1, createdAt: stamp,
               updatedAt: stamp, completedAt: "", resultJson: "", lastErrorCode: "" });
@@ -159,10 +166,37 @@ var ReclaimWhatsAppSheetsStore = (function () {
             return { status: "UNAVAILABLE", code: error.code || "EVENT_STORE_FAILURE" };
           }
         },
-        complete: function (eventId, digest, organizationId, result) {
+        linkRegistration: function (eventId, digestValue, organizationId, claimToken, request) {
+          return withLock(function () {
+            var record = eventRow(organizationId, eventId, accountScope);
+            if (!record || record.digest !== digestValue) fail("EVENT_CLAIM_MISMATCH");
+            if (record.status !== "PROCESSING" || !nonempty(claimToken, 256) || record.claimToken !== claimToken) fail("STALE_CLAIM_TOKEN");
+            if (!request || request.organizationId !== organizationId || !nonempty(request.registrationId, 180) || !nonempty(request.operationId, 180) ||
+                !nonempty(request.customerName, 120) || !nonempty(request.customerPhone, 80) ||
+                typeof request.latitude !== "number" || !isFinite(request.latitude) || request.latitude < -90 || request.latitude > 90 ||
+                typeof request.longitude !== "number" || !isFinite(request.longitude) || request.longitude < -180 || request.longitude > 180) fail("REGISTRATION_LINK_INVALID");
+            var payload = { organizationId: request.organizationId, registrationId: request.registrationId, operationId: request.operationId,
+              customerName: request.customerName, customerPhone: request.customerPhone, locationDescription: request.locationDescription || "",
+              latitude: request.latitude, longitude: request.longitude };
+            var fingerprint = String(digest(canonical(payload)));
+            if (record.operationId || record.registrationId || record.registrationFingerprint) {
+              if (record.operationId !== request.operationId || record.registrationId !== request.registrationId || record.registrationFingerprint !== fingerprint) fail("REGISTRATION_LINK_CONFLICT");
+              return { ok: true, durable: true, replay: true };
+            }
+            record.registrationId = request.registrationId; record.operationId = request.operationId;
+            record.registrationFingerprint = fingerprint; record.updatedAt = nowMs();
+            write("Events", record._row, record);
+            var verify = eventRow(organizationId, eventId, accountScope);
+            if (!verify || verify.claimToken !== claimToken || verify.registrationId !== request.registrationId || verify.operationId !== request.operationId || verify.registrationFingerprint !== fingerprint) fail("REGISTRATION_LINK_UNCERTAIN");
+            audit("EVENT", organizationId, eventId, "REGISTRATION_LINKED", "");
+            return { ok: true, durable: true, replay: false };
+          });
+        },
+        complete: function (eventId, digest, organizationId, claimToken, result) {
           return withLock(function () {
             var record = eventRow(organizationId, eventId, accountScope);
             if (!record || record.digest !== digest) fail("EVENT_CLAIM_MISMATCH");
+            if (!nonempty(claimToken, 256) || record.claimToken !== claimToken) fail("STALE_CLAIM_TOKEN");
             if (record.status === "COMPLETE") {
               if (record.resultJson !== JSON.stringify(result)) fail("EVENT_COMPLETION_CONFLICT");
               return { ok: true, replay: true };
@@ -176,13 +210,13 @@ var ReclaimWhatsAppSheetsStore = (function () {
             return { ok: true };
           });
         },
-        release: function (eventId, digest, organizationId, errorCode) {
+        release: function (eventId, digest, organizationId, claimToken, errorCode) {
           return withLock(function () {
             var record = eventRow(organizationId, eventId, accountScope);
-            if (!record) return { ok: true, missing: true };
-            if (record.digest !== digest) fail("EVENT_CLAIM_MISMATCH");
+            if (!record || record.digest !== digest) fail("EVENT_CLAIM_MISMATCH");
+            if (!nonempty(claimToken, 256) || record.claimToken !== claimToken) fail("STALE_CLAIM_TOKEN");
             if (record.status === "COMPLETE") return { ok: true, completed: true };
-            if (record.status !== "PROCESSING") return { ok: true, unchanged: true };
+            if (record.status !== "PROCESSING") fail("EVENT_STATE_INVALID");
             var stamp = nowMs();
             record.status = "RETRYABLE"; record.claimToken = ""; record.leaseExpiresAt = "";
             record.updatedAt = stamp; record.lastErrorCode = nonempty(errorCode, 80) ? errorCode : "PROCESSING_RETRYABLE";
@@ -337,12 +371,32 @@ var ReclaimWhatsAppSheetsStore = (function () {
         }).slice(0, limit);
         candidates.forEach(function (record) {
           inspected++;
-          // Expiry is not proof the prior execution stopped. Quarantine the claim;
-          // never automatically replay an event whose side effects are uncertain.
+          // A linked registration can be reconciled only when exactly one durable row
+          // matches both stable identifiers and the canonical payload fingerprint.
+          var linkedRows = record.organizationId && record.registrationId && record.operationId && record.registrationFingerprint ?
+            rows("Registrations").filter(function (registration) {
+              return registration.organizationId === record.organizationId &&
+                (registration.registrationId === record.registrationId || registration.operationId === record.operationId);
+            }) : [];
+          if (linkedRows.length === 1 && linkedRows[0].registrationId === record.registrationId &&
+              linkedRows[0].operationId === record.operationId && linkedRows[0].status === "SUCCEEDED" &&
+              linkedRows[0].payloadFingerprint === record.registrationFingerprint) {
+            record.status = "COMPLETE"; record.claimToken = ""; record.leaseExpiresAt = "";
+            record.updatedAt = stamp; record.completedAt = stamp;
+            record.resultJson = JSON.stringify({ ok: true, code: "REGISTERED",
+              message: "Your waste-collection registration was saved. This is not a collection booking; the company may contact you about next steps.",
+              registrationId: record.registrationId });
+            record.lastErrorCode = "";
+            write("Events", record._row, record);
+            audit("RECONCILIATION", record.organizationId, record.eventId, "RECOVERED", "LINKED_REGISTRATION_CONFIRMED");
+            return;
+          }
+          // Expiry alone is not proof that the old execution stopped. Ambiguous,
+          // absent, or contradictory registration rows are quarantined for review.
           record.status = "RECONCILIATION_REQUIRED"; record.claimToken = ""; record.leaseExpiresAt = "";
-          record.updatedAt = stamp; record.lastErrorCode = "LEASE_EXPIRED_REVIEW_REQUIRED";
+          record.updatedAt = stamp; record.lastErrorCode = linkedRows.length ? "REGISTRATION_LINK_CONTRADICTORY" : "LEASE_EXPIRED_REVIEW_REQUIRED";
           write("Events", record._row, record);
-          audit("RECONCILIATION", "", record.eventId, "MANUAL_REVIEW", "LEASE_EXPIRED_REVIEW_REQUIRED");
+          audit("RECONCILIATION", record.organizationId || "", record.eventId, "MANUAL_REVIEW", record.lastErrorCode);
           quarantined++;
           review++;
         });

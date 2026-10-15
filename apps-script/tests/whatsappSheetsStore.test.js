@@ -95,9 +95,10 @@ test("initialize creates versioned schema tabs and is repeatable", () => {
 test("event lifecycle distinguishes new, in-progress, completed replay, and conflicting reuse", () => {
   const f = fixture();
   const events = f.api.eventStore("ACCOUNT_A");
-  assert.equal(events.begin("e1", "d1", "ORG_A").status, "NEW");
+  const first = events.begin("e1", "d1", "ORG_A");
+  assert.equal(first.status, "NEW");
   assert.equal(events.begin("e1", "d1", "ORG_A").status, "IN_PROGRESS");
-  events.complete("e1", "d1", "ORG_A", { ok: true, code: "CONTINUE" });
+  events.complete("e1", "d1", "ORG_A", first.claimToken, { ok: true, code: "CONTINUE" });
   assert.equal(events.begin("e1", "d1", "ORG_A").status, "REPLAY");
   assert.equal(events.begin("e1", "different", "ORG_A").status, "CONFLICT");
   assert.equal(events.begin("e1", "d1", "ORG_B").status, "NEW");
@@ -106,8 +107,8 @@ test("event lifecycle distinguishes new, in-progress, completed replay, and conf
 test("released events may be retried but expired processing claims are quarantined", () => {
   const f = fixture();
   const events = f.api.eventStore("ACCOUNT_A");
-  events.begin("e1", "d1", "ORG_A");
-  events.release("e1", "d1", "ORG_A", "TEMPORARY_FAILURE");
+  const first = events.begin("e1", "d1", "ORG_A");
+  events.release("e1", "d1", "ORG_A", first.claimToken, "TEMPORARY_FAILURE");
   assert.equal(events.begin("e1", "d1", "ORG_A").status, "NEW");
   f.advance(101);
   const expired = events.begin("e1", "d1", "ORG_A");
@@ -118,9 +119,9 @@ test("released events may be retried but expired processing claims are quarantin
 test("invalid event transitions and mismatched event digests are rejected", () => {
   const f = fixture();
   const events = f.api.eventStore("ACCOUNT_A");
-  assert.throws(() => events.complete("missing", "d", "ORG_A", { ok: true }), /EVENT_CLAIM_MISMATCH/);
-  events.begin("e1", "d1", "ORG_A");
-  assert.throws(() => events.complete("e1", "d2", "ORG_A", { ok: true }), /EVENT_CLAIM_MISMATCH/);
+  assert.throws(() => events.complete("missing", "d", "ORG_A", "no-token", { ok: true }), /EVENT_CLAIM_MISMATCH/);
+  const claim = events.begin("e1", "d1", "ORG_A");
+  assert.throws(() => events.complete("e1", "d2", "ORG_A", claim.claimToken, { ok: true }), /EVENT_CLAIM_MISMATCH/);
 });
 
 test("session writes are durable, scoped, and cleared without deleting audit history", () => {
@@ -222,9 +223,9 @@ test("registration write with lost acknowledgement is safe to retry by stable ID
 test("event completion acknowledgement loss is detected as a completed replay on retry", () => {
   const f = fixture();
   const events = f.api.eventStore("ACCOUNT_A");
-  events.begin("lost-complete", "digest", "ORG_A");
+  const claim = events.begin("lost-complete", "digest", "ORG_A");
   f.options.failSetAfterWriteTab = "Events";
-  assert.throws(() => events.complete("lost-complete", "digest", "ORG_A", { ok: true, code: "CONTINUE" }), /acknowledgement lost/);
+  assert.throws(() => events.complete("lost-complete", "digest", "ORG_A", claim.claimToken, { ok: true, code: "CONTINUE" }), /acknowledgement lost/);
   assert.equal(events.begin("lost-complete", "digest", "ORG_A").status, "REPLAY");
 });
 
@@ -232,4 +233,64 @@ test("provider account scopes isolate event identity", () => {
   const f = fixture();
   assert.equal(f.api.eventStore("ACCOUNT_A").begin("same-id", "same-digest", "ORG_A").status, "NEW");
   assert.equal(f.api.eventStore("ACCOUNT_B").begin("same-id", "same-digest", "ORG_A").status, "NEW");
+});
+
+test("claim tokens fence stale workers from completing or releasing a newer claim", () => {
+  const f = fixture();
+  const events = f.api.eventStore("ACCOUNT_A");
+  const first = events.begin("fenced-event", "digest", "ORG_A");
+  events.release("fenced-event", "digest", "ORG_A", first.claimToken, "RETRY");
+  const second = events.begin("fenced-event", "digest", "ORG_A");
+  assert.equal(second.status, "NEW");
+  assert.notEqual(second.claimToken, first.claimToken);
+  assert.throws(() => events.complete("fenced-event", "digest", "ORG_A", first.claimToken, { ok: true }), /STALE_CLAIM_TOKEN/);
+  assert.throws(() => events.release("fenced-event", "digest", "ORG_A", first.claimToken, "STALE"), /STALE_CLAIM_TOKEN/);
+  assert.equal(events.complete("fenced-event", "digest", "ORG_A", second.claimToken, { ok: true }).ok, true);
+});
+
+test("registration linkage is persisted before the registration adapter is invoked", () => {
+  const f = fixture();
+  const events = f.api.eventStore("ACCOUNT_A");
+  const claim = events.begin("linked-event", "digest", "ORG_A");
+  const request = { organizationId: "ORG_A", registrationId: "reg-link", operationId: "op-link",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", locationDescription: "",
+    latitude: -24.6, longitude: 25.9 };
+  assert.equal(events.linkRegistration("linked-event", "digest", "ORG_A", claim.claimToken, request).durable, true);
+  const headers = f.api.schema().Events;
+  const row = f.spreadsheet.getSheetByName("Events")._data[1];
+  assert.equal(row[headers.indexOf("registrationId")], "reg-link");
+  assert.equal(row[headers.indexOf("operationId")], "op-link");
+  assert.ok(row[headers.indexOf("registrationFingerprint")]);
+  assert.throws(() => events.linkRegistration("linked-event", "digest", "ORG_A", "stale", request), /STALE_CLAIM_TOKEN/);
+});
+
+test("reconciliation completes an expired claim only when its linked registration is durably confirmed", () => {
+  const f = fixture();
+  const events = f.api.eventStore("ACCOUNT_A");
+  const claim = events.begin("recover-registration", "digest-r", "ORG_A");
+  const request = { organizationId: "ORG_A", registrationId: "reg-recover", operationId: "op-recover",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", locationDescription: "",
+    latitude: -24.6, longitude: 25.9 };
+  assert.equal(events.linkRegistration("recover-registration", "digest-r", "ORG_A", claim.claimToken, request).durable, true);
+  assert.equal(f.api.registrationStore().create(request).durable, true);
+  f.advance(101);
+  const result = f.api.reconcile({ limit: 1 });
+  assert.equal(result.quarantinedExpiredClaims, 0);
+  assert.equal(events.begin("recover-registration", "digest-r", "ORG_A").status, "REPLAY");
+  assert.throws(() => events.complete("recover-registration", "digest-r", "ORG_A", claim.claimToken, { ok: true }), /STALE_CLAIM_TOKEN/);
+});
+
+test("reconciliation quarantines linked claims when the registration row is absent", () => {
+  const f = fixture();
+  const events = f.api.eventStore("ACCOUNT_A");
+  const claim = events.begin("recover-missing", "digest-m", "ORG_A");
+  const request = { organizationId: "ORG_A", registrationId: "reg-missing", operationId: "op-missing",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", locationDescription: "",
+    latitude: 0, longitude: 0 };
+  events.linkRegistration("recover-missing", "digest-m", "ORG_A", claim.claimToken, request);
+  f.advance(101);
+  const result = f.api.reconcile({ limit: 1 });
+  assert.equal(result.quarantinedExpiredClaims, 1);
+  assert.equal(events.begin("recover-missing", "digest-m", "ORG_A").code, "RECONCILIATION_REQUIRED");
+  assert.throws(() => events.release("recover-missing", "digest-m", "ORG_A", claim.claimToken, "STALE"), /STALE_CLAIM_TOKEN/);
 });

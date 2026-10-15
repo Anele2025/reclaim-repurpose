@@ -60,14 +60,14 @@ function fixture(options = {}) {
     claimLeaseMs: 100,
     batchLimit: 3
   });
-  api.initialize();
+  if (!options.skipInitialize) api.initialize();
   return { api, spreadsheet, advance: ms => { clock += ms; } };
 }
 const event = (store, id = "event-1", digest = "digest", org = "ORG_A") => store.eventStore("ACCOUNT_A").begin(id, digest, org);
 
 test("configuration and lock failures fail closed", () => {
   assert.throws(() => context.ReclaimWhatsAppSheetsStore.create({}), /STORE_CONFIGURATION_INVALID/);
-  const f = fixture({ lockBusy: true });
+  const f = fixture({ lockBusy: true, skipInitialize: true });
   assert.throws(() => f.api.reconcile(), /STORE_LOCK_BUSY/);
 });
 
@@ -96,8 +96,9 @@ test("released events may be retried but expired processing claims are quarantin
   events.release("e1", "d1", "ORG_A", "TEMPORARY_FAILURE");
   assert.equal(events.begin("e1", "d1", "ORG_A").status, "NEW");
   f.advance(101);
-  assert.equal(events.begin("e1", "d1", "ORG_A").status, "UNAVAILABLE");
-  assert.equal(events.begin("e1", "d1", "ORG_A").code, "RECONCILIATION_REQUIRED");
+  const expired = events.begin("e1", "d1", "ORG_A");
+  assert.equal(expired.status, "UNAVAILABLE");
+  assert.equal(expired.code, "RECONCILIATION_REQUIRED");
 });
 
 test("invalid event transitions and mismatched event digests are rejected", () => {
@@ -174,5 +175,7 @@ test("reconciliation is bounded, repeatable, and never deletes registration rows
 test("schema mismatch fails closed", () => {
   const f = fixture();
   f.spreadsheet.getSheetByName("Events").getRange(1, 1, 1, 1).setValues([["wrong"]]);
-  assert.throws(() => f.api.eventStore("ACCOUNT_A").begin("e1", "d1", "ORG_A"), /SCHEMA_MISMATCH_EVENTS/);
+  const result = f.api.eventStore("ACCOUNT_A").begin("e1", "d1", "ORG_A");
+  assert.equal(result.status, "UNAVAILABLE");
+  assert.equal(result.code, "SCHEMA_MISMATCH_EVENTS");
 });

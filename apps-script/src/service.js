@@ -74,7 +74,19 @@ var ReclaimService = (function () {
       if (!membership.ok) return membership;
       var organization = organizationFor(organizationId, allowProspect, requiredRole);
       if (!organization.ok) return organization;
-      return { ok: true, actorId: identity.actorId, membership: membership.membership, organization: organization.organization };
+      var version = Number(organization.organization.configVersion);
+      if (!isFinite(version) || version < 1 || Math.floor(version) !== version) {
+        return { ok: false, error: { code: "CONFIGURATION_INVALID", message: "Organization configuration could not be verified." } };
+      }
+      var policy;
+      try {
+        policy = deps.authorization.authorize(identity.actorId, membership.membership,
+          organization.organization, organizationId, [requiredRole]);
+      } catch (_) {
+        return { ok: false, error: { code: "AUTHORIZATION_UNAVAILABLE", message: "Access could not be verified." } };
+      }
+      if (!policy || !policy.ok) return policy || { ok: false, error: { code: "AUTHORIZATION_UNAVAILABLE", message: "Access could not be verified." } };
+      return { ok: true, actorId: identity.actorId, membership: membership.membership, organization: organization.organization, auth: policy };
     }
     function audit(context, action, outcome, reasonCode, operationId, recordRef) {
       return deps.audit.record(deps.repository, {

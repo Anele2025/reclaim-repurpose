@@ -43,15 +43,17 @@ var ReclaimIdempotency = (function () {
       reserved = true;
       var result = mutation();
       if (!result || result.ok !== true) {
-        repository.updateOperation(input.operationId, {
+        var failedState = repository.updateOperation(input.operationId, {
           status: "FAILED_RETRYABLE", resultRef: "", resultJson: "", updatedAt: now
         });
+        if (!failedState) throw new Error("OPERATION_STATE_NOT_PERSISTED");
         return result || fail("MUTATION_FAILED", "Operation did not complete.");
       }
-      repository.updateOperation(input.operationId, {
+      var completedState = repository.updateOperation(input.operationId, {
         status: "SUCCEEDED", resultRef: String(result.recordRef || ""),
         resultJson: JSON.stringify(result.value === undefined ? null : result.value), updatedAt: now
       });
+      if (!completedState) throw new Error("OPERATION_STATE_NOT_PERSISTED");
       return { ok: true, replayed: false, value: result.value, correlationId: input.correlationId };
     } catch (_) {
       if (reserved) {

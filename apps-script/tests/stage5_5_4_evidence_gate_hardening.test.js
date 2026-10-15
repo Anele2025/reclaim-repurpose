@@ -23,7 +23,7 @@ function verifiedClaim() {
     environment: "GOOGLE_LIVE",
     executedAt: "2026-10-15T10:00:00+02:00",
     executionCommitSha: SHA,
-    status: "VERIFIED",
+    status: "PASS",
     observedOutcome: "Synthetic test fixture claims a pass; this is not real evidence.",
     evidenceRef: "docs/digital/security-evidence/reviewed/live-case-record.md",
     executionMethod: "Manual authenticated Apps Script execution under a restricted test deployment",
@@ -36,7 +36,7 @@ function verifiedClaim() {
       reviewRecordRef: "docs/digital/security-evidence/reviewed/review-record.md"
     }
   }));
-  value.evidenceAssessmentStatus = "VERIFIED";
+  value.evidenceAssessmentStatus = "PASS";
   value.gateStatus = "BLOCKED";
   return value;
 }
@@ -56,18 +56,18 @@ test("baseline passes structural validation while the effective gate remains blo
 test("complete synthetic claims cannot authorize the effective live gate", () => {
   const value = verifiedClaim();
   value.cases.forEach(item => { item.environment = "SYNTHETIC"; });
-  assert.throws(() => validateManifest(value), /cannot be VERIFIED outside GOOGLE_LIVE/);
+  assert.throws(() => validateManifest(value), /requires GOOGLE_LIVE evidence/);
 });
 
 test("editing gateStatus alone cannot pass the live gate", () => {
   const value = clone(baseline);
-  value.gateStatus = "VERIFIED";
+  value.gateStatus = "PASS";
   assert.throws(() => validateManifest(value), /gateStatus must remain BLOCKED/);
 });
 
 test("inconsistent evidenceAssessmentStatus is rejected", () => {
   const value = clone(baseline);
-  value.evidenceAssessmentStatus = "VERIFIED";
+  value.evidenceAssessmentStatus = "PASS";
   assert.throws(() => validateManifest(value), /evidenceAssessmentStatus contradiction/);
 });
 
@@ -146,7 +146,7 @@ test("ordinary words in safe repository paths are not treated as placeholders", 
   assert.equal(validEvidenceRef("docs/digital/security-evidence/owner-review/approval-record.pdf"), true);
 });
 
-test("NOT_STARTED and BLOCKED cannot retain stale execution evidence", () => {
+test("NOT_EXECUTED and BLOCKED cannot retain stale execution evidence", () => {
   const notStarted = clone(baseline);
   notStarted.cases[0].executionCommitSha = SHA;
   assert.throws(() => validateManifest(notStarted), /executionCommitSha must be null/);
@@ -157,27 +157,42 @@ test("NOT_STARTED and BLOCKED cannot retain stale execution evidence", () => {
   assert.throws(() => validateManifest(blocked), /executionCommitSha must be null/);
 });
 
-test("FAILED requires an execution record and consistent aggregate status", () => {
+test("FAIL requires an execution record and consistent aggregate status", () => {
   const value = clone(baseline);
   Object.assign(value.cases[0], {
-    status: "FAILED",
-    environment: "SYNTHETIC",
+    status: "FAIL",
+    environment: "GOOGLE_LIVE",
     executedAt: "2026-10-15T10:00:00Z",
     executionCommitSha: SHA,
-    observedOutcome: "Synthetic regression failed as expected.",
+    observedOutcome: "Live synthetic-account security test failed as expected.",
+    executionMethod: "Manual authenticated Apps Script execution under a restricted test deployment",
     evidenceRef: "docs/digital/security-evidence/test-runs/failure-record.md",
     verifierRole: "AUTHORIZED_PROJECT_OWNER"
   });
-  value.evidenceAssessmentStatus = "FAILED";
-  assert.equal(validateManifest(value).evidenceAssessmentStatus, "FAILED");
+  value.evidenceAssessmentStatus = "FAIL";
+  assert.equal(validateManifest(value).evidenceAssessmentStatus, "FAIL");
   value.cases[0].evidenceRef = null;
-  assert.throws(() => validateManifest(value), /FAILED requires timestamp/);
+  assert.throws(() => validateManifest(value), /evidenceRef must be a sanitized relative repository artifact path/);
+});
+
+test("live evidence awaiting independent review is distinct from a passed case", () => {
+  const value = verifiedClaim();
+  value.cases.forEach(item => {
+    item.status = "AWAITING_INDEPENDENT_REVIEW";
+    item.independentReviewCompleted = false;
+    item.review = null;
+  });
+  value.evidenceAssessmentStatus = "AWAITING_INDEPENDENT_REVIEW";
+  const result = validateManifest(value);
+  assert.equal(result.evidenceAssessmentStatus, "AWAITING_INDEPENDENT_REVIEW");
+  assert.equal(result.gateStatus, "BLOCKED");
+  assert.equal(result.passedCaseCount, 0);
 });
 
 test("AppSheet authentication cannot be marked complete without qualifying live evidence", () => {
   const value = clone(baseline);
   const item = value.cases.find(entry => entry.testCaseId === "APPSHEET-AUTH");
-  item.status = "VERIFIED";
+  item.status = "PASS";
   item.environment = "GOOGLE_LIVE";
   value.evidenceAssessmentStatus = "BLOCKED";
   assert.throws(() => validateManifest(value), /executedAt must be a real ISO timestamp/);

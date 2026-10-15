@@ -43,8 +43,10 @@
 ## Verification status
 
 - Implementation: committed on the Stage 5.12 branch.
-- Test changes: committed; automated tests have **not been independently executed in this implementation session**.
-- CI: pending a GitHub Actions run for the final branch head; do not infer a pass from the existence of workflow files.
+- Final branch head at verification: `e4576d7a38e9fea3622a42309ad39c459bcac623`.
+- Stage 5 validation: **127 JavaScript tests passed, 0 failed; 4 Python package tests passed; deterministic package build, generated syntax check, and Stage 4 validation passed**. [Run 38825889897](https://github.com/Anele2025/reclaim-repurpose/actions/runs/38825889897).
+- Security Evidence Validation: **13 evidence-validator tests and 18 adversarial evidence-gate tests passed; all 127 JavaScript tests, 4 package tests, package build, generated syntax check, and Stage 4 validation passed**. [Run 38825889904](https://github.com/Anele2025/reclaim-repurpose/actions/runs/38825889904).
+- These are repository/fixture checks only. They do not constitute live Google integration or deployment verification.
 - Real Google Sheets / Apps Script integration: NOT TESTED.
 - WhatsApp provider integration: NOT IMPLEMENTED.
 - Deployment: NOT PERFORMED.

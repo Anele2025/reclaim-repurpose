@@ -37,7 +37,8 @@ function fixture(options = {}) {
         if (options.failComplete) throw new Error("completion unavailable");
         const key = org + "|" + id, previous = state.events.get(key);
         if (!previous || previous.digest !== digest || previous.status !== "PROCESSING" || previous.claimToken !== claimToken) throw new Error("STALE_CLAIM_TOKEN");
-        state.events.set(key, { digest, org, status: "COMPLETE", result });
+        state.events.set(key, { digest, org, status: "COMPLETE", result, claimToken });
+        return { ok: true };
       },
       release(id, digest, org, claimToken) {
         const key = org + "|" + id, previous = state.events.get(key);

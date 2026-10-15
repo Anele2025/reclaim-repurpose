@@ -54,7 +54,23 @@ var ReclaimSheetsRepository = (function () {
     }
     function append(name, record) {
       if (!record || typeof record !== "object" || Array.isArray(record)) throw new Error("INVALID_RECORD");
-      var sheet = getSheet(name), schema = SCHEMAS[name];
+      var schema = SCHEMAS[name];
+      if (!schema) throw new Error("SHEET_NOT_ALLOWED");
+      if (Object.keys(record).some(function (key) { return schema.indexOf(key) < 0; })) throw new Error("FIELD_NOT_ALLOWED");
+      var stable = STABLE_IDS[name];
+      if (stable && (record[stable] === undefined || record[stable] === null || String(record[stable]) === "")) throw new Error("STABLE_ID_REQUIRED");
+      var required = {
+        Organizations: ["organizationId","organizationName","country","currency","status","serviceEnabled","configVersion"],
+        Memberships: ["membershipId","organizationId","actorId","role","status"],
+        AuditEvents: ["eventId","timestamp","action","outcome"],
+        Idempotency: ["operationId","actorId","organizationId","operationType","payloadDigest","status","correlationId"]
+      }[name];
+      if (required && required.some(function (key) { return record[key] === undefined || record[key] === null || String(record[key]).trim() === ""; })) {
+        throw new Error("REQUIRED_FIELD_MISSING");
+      }
+      var existing = stable ? findAll(name, stable, record[stable]) : [];
+      if (existing.length) throw new Error("DUPLICATE_STABLE_ID");
+      var sheet = getSheet(name);
       var row = schema.map(function (key) {
         var value = record[key] === undefined ? "" : record[key];
         if (value === null || ["string","number","boolean"].indexOf(typeof value) >= 0 || value instanceof Date) {

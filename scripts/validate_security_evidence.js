@@ -86,7 +86,8 @@ function validateManifest(manifest) {
   if (manifest.schemaVersion !== 1) fail("schemaVersion must equal 1");
   if (!SHA_RE.test(manifest.baselineCommitSha || "")) fail("baselineCommitSha must be a full commit SHA");
   if (!Array.isArray(manifest.cases)) fail("cases must be an array");
-  if (!STATES.has(manifest.gateStatus)) fail("gateStatus is unsupported");
+  if (manifest.gateStatus !== "BLOCKED") fail("gateStatus must remain BLOCKED: this structural validator cannot authorize the live-security gate");
+  if (!STATES.has(manifest.evidenceAssessmentStatus)) fail("evidenceAssessmentStatus is unsupported");
   hasPlaceholder(manifest, "manifest");
 
   const seen = new Set();
@@ -121,8 +122,8 @@ function validateManifest(manifest) {
   const missing = [...REQUIRED_IDS].filter(id => !seen.has(id));
   if (missing.length) fail("Missing required test cases: " + missing.join(", "));
   const derived = deriveGateStatus(manifest.cases);
-  if (manifest.gateStatus !== derived) fail("gateStatus contradiction: manifest says " + manifest.gateStatus + ", derived status is " + derived);
-  return { structurallyValid: true, gateStatus: derived, requiredCaseCount: REQUIRED_IDS.size, verifiedCaseCount: manifest.cases.filter(item => item.status === "VERIFIED").length };
+  if (manifest.evidenceAssessmentStatus !== derived) fail("evidenceAssessmentStatus contradiction: manifest says " + manifest.evidenceAssessmentStatus + ", derived status is " + derived);
+  return { structurallyValid: true, evidenceAssessmentStatus: derived, gateStatus: "BLOCKED", requiredCaseCount: REQUIRED_IDS.size, verifiedCaseCount: manifest.cases.filter(item => item.status === "VERIFIED").length };
 }
 function main(argv) {
   const args = argv.slice(2);
@@ -135,13 +136,17 @@ function main(argv) {
     console.log(JSON.stringify({
       repositoryEvidenceValidation: "PASSED",
       structuralValidation: "PASSED",
-      liveSecurityGate: result.gateStatus,
+      evidenceAssessmentStatus: result.evidenceAssessmentStatus,
+      liveSecurityGate: "BLOCKED",
       liveGateAuthorization: "NOT_GRANTED_BY_STRUCTURAL_VALIDATOR",
       verifiedCaseCount: result.verifiedCaseCount,
       requiredCaseCount: result.requiredCaseCount,
       note: "This validator cannot authenticate Google execution or independently inspect evidence. A passing structural check is not live-security approval."
     }, null, 2));
-    if (enforceLiveGate && result.gateStatus !== "VERIFIED") process.exitCode = 2;
+    if (enforceLiveGate) {
+      console.error("Live gate enforcement refused: an external authorized reviewer must independently inspect the underlying evidence; this validator cannot grant release authorization.");
+      process.exitCode = 3;
+    }
   } catch (error) {
     console.error("Security evidence validation failed: " + error.message);
     process.exitCode = 1;

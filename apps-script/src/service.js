@@ -171,6 +171,102 @@ var ReclaimService = (function () {
       return { ok: true, value: result.value, replayed: result.replayed === true, correlationId: correlationId };
     }
 
+
+    var SITE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/;
+    function siteInput(request, mode) {
+      if (!request || typeof request !== "object" || Array.isArray(request)) return { ok: false, error: { code: "INVALID_REQUEST", message: "Request fields are invalid." } };
+      var allowed = mode === "DEACTIVATE" ? ["organizationId","siteId","operationId"] : ["organizationId","siteId","siteName","country","locationDescription","operationId"];
+      if (Object.keys(request).some(function (key) { return allowed.indexOf(key) < 0; })) return { ok: false, error: { code: "INVALID_REQUEST", message: "Request fields are invalid." } };
+      if (typeof request.organizationId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/.test(request.organizationId) || typeof request.siteId !== "string" || !SITE_ID_PATTERN.test(request.siteId)) return { ok: false, error: { code: "INVALID_SITE_SCOPE", message: "Organization and site identifiers are required." } };
+      if (typeof request.operationId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/.test(request.operationId)) return { ok: false, error: { code: "INVALID_OPERATION_ID", message: "A valid operation ID is required." } };
+      var value = { organizationId: request.organizationId, siteId: request.siteId, operationId: request.operationId };
+      if (mode === "CREATE" || (mode === "UPDATE" && Object.prototype.hasOwnProperty.call(request, "siteName"))) {
+        if (typeof request.siteName !== "string" || !request.siteName.trim() || request.siteName.trim().length > 120 || /[\\u0000-\\u001F]/.test(request.siteName)) return { ok: false, error: { code: "INVALID_SITE_NAME", message: "Site name must contain 1–120 safe characters." } };
+        value.siteName = request.siteName.trim();
+      }
+      if (mode === "CREATE" || (mode === "UPDATE" && Object.prototype.hasOwnProperty.call(request, "country"))) {
+        if (["Botswana","Eswatini"].indexOf(request.country) < 0) return { ok: false, error: { code: "UNSUPPORTED_SITE_COUNTRY", message: "Country must be Botswana or Eswatini." } };
+        value.country = request.country;
+      }
+      if (mode === "CREATE" || (mode === "UPDATE" && Object.prototype.hasOwnProperty.call(request, "locationDescription"))) {
+        var location = optionalText(request.locationDescription, "locationDescription", 240);
+        if (!location.ok) return { ok: false, error: { code: "INVALID_SITE_LOCATION", message: "Site location description is invalid." } };
+        value.locationDescription = location.value;
+      }
+      if (mode === "UPDATE" && !Object.prototype.hasOwnProperty.call(request, "siteName") && !Object.prototype.hasOwnProperty.call(request, "country") && !Object.prototype.hasOwnProperty.call(request, "locationDescription")) return { ok: false, error: { code: "INVALID_REQUEST", message: "At least one permitted site detail must be supplied." } };
+      return { ok: true, value: value };
+    }
+    function createCollectionSite(request) {
+      var correlationId = id(), input = siteInput(request, "CREATE");
+      if (!input.ok) return denied(input, "CREATE_COLLECTION_SITE", correlationId, request && request.organizationId);
+      var value = input.value, context = contextFor(value.organizationId, "COMPANY_OWNER", false);
+      if (!context.ok) return denied(context, "CREATE_COLLECTION_SITE", correlationId, value.organizationId);
+      if (value.country !== context.organization.country) return denied({ error: { code: "SITE_COUNTRY_MISMATCH", message: "Site country must match the organization's registered country." } }, "CREATE_COLLECTION_SITE", correlationId, value.organizationId);
+      if (typeof deps.digest !== "function") return safe("DIGEST_UNAVAILABLE", "Operation could not be safely prepared.", correlationId);
+      var digest; try { digest = deps.digest(JSON.stringify(value)); } catch (_) { return safe("DIGEST_UNAVAILABLE", "Operation could not be safely prepared.", correlationId); }
+      if (typeof digest !== "string" || !digest) return safe("DIGEST_UNAVAILABLE", "Operation could not be safely prepared.", correlationId);
+      var result = deps.idempotency.execute(deps.repository, deps.lockService, { operationId: value.operationId, actorId: context.actorId, organizationId: value.organizationId, operationType: "CREATE_COLLECTION_SITE", payloadDigest: digest, correlationId: correlationId }, now(), function () {
+        var refreshed = contextFor(value.organizationId, "COMPANY_OWNER", false);
+        if (!refreshed.ok) throw new Error("AUTHORIZATION_CHANGED");
+        var existing; try { existing = deps.repository.findCollectionSite(value.siteId); } catch (_) { throw new Error("STORAGE_UNAVAILABLE"); }
+        if (existing) return { ok: false, error: { code: "SITE_ID_UNAVAILABLE", message: "Site ID is already registered or unavailable." } };
+        if (!audit(refreshed, "CREATE_COLLECTION_SITE", "ATTEMPTED", "", value.operationId, value.siteId).ok) throw new Error("AUDIT_REQUIRED");
+        var timestamp = now(), site = { siteId: value.siteId, organizationId: value.organizationId, siteName: value.siteName, country: value.country, locationDescription: value.locationDescription, status: "ACTIVE", createdAt: timestamp, updatedAt: timestamp, createdBy: refreshed.actorId, updatedBy: refreshed.actorId };
+        try { deps.repository.appendCollectionSite(site); } catch (_) { throw new Error("WRITE_OUTCOME_UNCERTAIN"); }
+        if (!audit(refreshed, "CREATE_COLLECTION_SITE", "SUCCEEDED", "", value.operationId, value.siteId).ok) throw new Error("POST_WRITE_AUDIT_UNAVAILABLE");
+        return { ok: true, recordRef: value.siteId, value: site };
+      });
+      if (!result.ok) { var err = result.error || {}; if (!audit(context, "CREATE_COLLECTION_SITE", "FAILED", err.code || "REQUEST_FAILED", value.operationId, value.siteId).ok && err.code !== "RECONCILIATION_REQUIRED") return safe("AUDIT_UNAVAILABLE", "Request could not be safely completed.", correlationId); return safe(err.code || "REQUEST_FAILED", err.message || "Request could not be completed.", correlationId); }
+      if (result.replayed && !audit(context, "CREATE_COLLECTION_SITE_REPLAY", "REPLAYED", "", value.operationId, value.siteId).ok) return safe("AUDIT_UNAVAILABLE", "Request could not be safely completed.", correlationId);
+      return { ok: true, value: result.value, replayed: result.replayed === true, correlationId: correlationId };
+    }
+    function getCollectionSite(request) {
+      var correlationId = id(), target = request && request.organizationId, siteId = request && request.siteId;
+      if (!request || typeof request !== "object" || Array.isArray(request) || Object.keys(request).some(function (key) { return ["organizationId","siteId"].indexOf(key) < 0; }) || typeof siteId !== "string" || !SITE_ID_PATTERN.test(siteId)) return denied({ error: { code: "INVALID_REQUEST", message: "Request fields are invalid." } }, "READ_COLLECTION_SITE", correlationId, target);
+      var context = contextFor(target, "COMPANY_OWNER", false); if (!context.ok) return denied(context, "READ_COLLECTION_SITE", correlationId, target);
+      var site; try { site = deps.repository.findCollectionSite(siteId); } catch (_) { return safe("STORAGE_UNAVAILABLE", "The request could not be completed.", correlationId); }
+      if (!site || String(site.organizationId) !== String(context.organization.organizationId)) return safe("SITE_NOT_FOUND", "Site could not be found.", correlationId);
+      if (!audit(context, "READ_COLLECTION_SITE", "SUCCEEDED", "", "", siteId).ok) return safe("AUDIT_UNAVAILABLE", "Request could not be safely completed.", correlationId);
+      return { ok: true, value: site, correlationId: correlationId };
+    }
+    function listCollectionSites(request) {
+      var correlationId = id(), target = request && request.organizationId, limit = request && request.limit !== undefined ? request.limit : 100;
+      if (!request || typeof request !== "object" || Array.isArray(request) || Object.keys(request).some(function (key) { return ["organizationId","limit"].indexOf(key) < 0; }) || typeof limit !== "number" || !isFinite(limit) || Math.floor(limit) !== limit || limit < 1 || limit > 200) return denied({ error: { code: "INVALID_REQUEST", message: "Request fields are invalid." } }, "LIST_COLLECTION_SITES", correlationId, target);
+      var context = contextFor(target, "COMPANY_OWNER", false); if (!context.ok) return denied(context, "LIST_COLLECTION_SITES", correlationId, target);
+      var sites; try { sites = deps.repository.findCollectionSitesForOrganization(context.organization.organizationId, limit); } catch (_) { return safe("STORAGE_UNAVAILABLE", "The request could not be completed.", correlationId); }
+      if (!Array.isArray(sites) || sites.some(function (site) { return String(site.organizationId) !== String(context.organization.organizationId); })) return safe("STORAGE_INTEGRITY_ERROR", "Sites could not be safely returned.", correlationId);
+      if (!audit(context, "LIST_COLLECTION_SITES", "SUCCEEDED", "", "", "").ok) return safe("AUDIT_UNAVAILABLE", "Request could not be safely completed.", correlationId);
+      return { ok: true, value: sites, correlationId: correlationId };
+    }
+    function mutateCollectionSite(request, deactivate) {
+      var action = deactivate ? "DEACTIVATE_COLLECTION_SITE" : "UPDATE_COLLECTION_SITE", correlationId = id(), input = siteInput(request, deactivate ? "DEACTIVATE" : "UPDATE");
+      if (!input.ok) return denied(input, action, correlationId, request && request.organizationId);
+      var value = input.value, context = contextFor(value.organizationId, "COMPANY_OWNER", false); if (!context.ok) return denied(context, action, correlationId, value.organizationId);
+      if (value.country && value.country !== context.organization.country) return denied({ error: { code: "SITE_COUNTRY_MISMATCH", message: "Site country must match the organization's registered country." } }, action, correlationId, value.organizationId);
+      if (typeof deps.digest !== "function") return safe("DIGEST_UNAVAILABLE", "Operation could not be safely prepared.", correlationId);
+      var digest; try { digest = deps.digest(JSON.stringify({ organizationId: value.organizationId, siteId: value.siteId, siteName: value.siteName, country: value.country, locationDescription: value.locationDescription, deactivate: deactivate })); } catch (_) { return safe("DIGEST_UNAVAILABLE", "Operation could not be safely prepared.", correlationId); }
+      if (typeof digest !== "string" || !digest) return safe("DIGEST_UNAVAILABLE", "Operation could not be safely prepared.", correlationId);
+      var result = deps.idempotency.execute(deps.repository, deps.lockService, { operationId: value.operationId, actorId: context.actorId, organizationId: value.organizationId, operationType: action, payloadDigest: digest, correlationId: correlationId }, now(), function () {
+        var refreshed = contextFor(value.organizationId, "COMPANY_OWNER", false); if (!refreshed.ok) throw new Error("AUTHORIZATION_CHANGED");
+        var current; try { current = deps.repository.findCollectionSite(value.siteId); } catch (_) { throw new Error("STORAGE_UNAVAILABLE"); }
+        if (!current || String(current.organizationId) !== String(refreshed.organization.organizationId)) return { ok: false, error: { code: "SITE_NOT_FOUND", message: "Site could not be found." } };
+        if (!audit(refreshed, action, "ATTEMPTED", "", value.operationId, value.siteId).ok) throw new Error("AUDIT_REQUIRED");
+        var changes = { updatedAt: now(), updatedBy: refreshed.actorId };
+        if (deactivate) changes.status = "INACTIVE";
+        else { if (value.siteName !== undefined) changes.siteName = value.siteName; if (value.country !== undefined) changes.country = value.country; if (value.locationDescription !== undefined) changes.locationDescription = value.locationDescription; }
+        var updated; try { updated = deps.repository.updateCollectionSite(value.siteId, changes); } catch (_) { throw new Error("WRITE_OUTCOME_UNCERTAIN"); }
+        if (!updated) return { ok: false, error: { code: "SITE_NOT_FOUND", message: "Site could not be found." } };
+        if (!audit(refreshed, action, "SUCCEEDED", "", value.operationId, value.siteId).ok) throw new Error("POST_WRITE_AUDIT_UNAVAILABLE");
+        var site = {}; Object.keys(current).forEach(function (key) { site[key] = current[key]; }); Object.keys(changes).forEach(function (key) { site[key] = changes[key]; });
+        return { ok: true, recordRef: value.siteId, value: site };
+      });
+      if (!result.ok) { var err = result.error || {}; if (!audit(context, action, "FAILED", err.code || "REQUEST_FAILED", value.operationId, value.siteId).ok && err.code !== "RECONCILIATION_REQUIRED") return safe("AUDIT_UNAVAILABLE", "Request could not be safely completed.", correlationId); return safe(err.code || "REQUEST_FAILED", err.message || "Request could not be completed.", correlationId); }
+      if (result.replayed && !audit(context, action + "_REPLAY", "REPLAYED", "", value.operationId, value.siteId).ok) return safe("AUDIT_UNAVAILABLE", "Request could not be safely completed.", correlationId);
+      return { ok: true, value: result.value, replayed: result.replayed === true, correlationId: correlationId };
+    }
+    function updateCollectionSite(request) { return mutateCollectionSite(request, false); }
+    function deactivateCollectionSite(request) { return mutateCollectionSite(request, true); }
+
     var MATERIAL_CATEGORIES = ["PLASTIC","PAPER","CARDBOARD","GLASS","METAL","ORGANIC","E_WASTE","TEXTILES","MIXED_RECYCLABLES","OTHER"];
     var COLLECTION_UNITS = ["kg","g","tonne","item","bag","litre"];
     function validTimestamp(value) {
@@ -239,6 +335,9 @@ var ReclaimService = (function () {
           return { ok: false, error: refreshed.error };
         }
         if (!audit(refreshed, "CREATE_COLLECTION_RECORD", "ATTEMPTED", "", value.operationId, collectionId).ok) throw new Error("AUDIT_REQUIRED");
+        var registeredSite;
+        try { registeredSite = deps.repository.findCollectionSite(value.siteId); } catch (_) { throw new Error("STORAGE_UNAVAILABLE"); }
+        if (!registeredSite || String(registeredSite.organizationId) !== String(refreshed.organization.organizationId) || registeredSite.status !== "ACTIVE") return { ok: false, error: { code: "SITE_NOT_AVAILABLE", message: "An active registered site in this organization is required." } };
         var timestamp = now();
         var record = {
           collectionId: collectionId, organizationId: value.organizationId, siteId: value.siteId,
@@ -344,6 +443,11 @@ var ReclaimService = (function () {
     return Object.freeze({
       getOrganizationSummary: getOrganizationSummary,
       setOrganizationServiceEnabled: setOrganizationServiceEnabled,
+      createCollectionSite: createCollectionSite,
+      getCollectionSite: getCollectionSite,
+      listCollectionSites: listCollectionSites,
+      updateCollectionSite: updateCollectionSite,
+      deactivateCollectionSite: deactivateCollectionSite,
       recordCollection: recordCollection,
       getCollectionRecord: getCollectionRecord,
       listCollectionRecords: listCollectionRecords,

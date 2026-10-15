@@ -19,6 +19,7 @@ on:
       - stage-5-10-whatsapp-durable-boundary
       - stage-5-11-durable-sheets-recovery
       - stage-5-12-claim-fencing-recovery
+      - stage-5-13-adversarial-recovery
 
 jobs:
   pure-validation:

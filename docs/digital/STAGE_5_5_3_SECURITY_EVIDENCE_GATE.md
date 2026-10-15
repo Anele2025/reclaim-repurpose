@@ -45,13 +45,13 @@ The hardening adds exact key sets for the manifest, cases, and review records; c
 
 Each test case uses one of:
 
-- `NOT_STARTED` — no qualifying execution has been recorded.
-- `IN_PROGRESS` — an identified test environment has been selected and the test is underway.
-- `BLOCKED` — a prerequisite or safe execution path is unavailable.
-- `FAILED` — an execution produced a failing outcome and must retain its execution record.
-- `VERIFIED` — the record claims a qualifying live test passed and includes required provenance and independent-review fields.
+- `NOT_EXECUTED` — no genuine execution result has been recorded.
+- `BLOCKED` — a prerequisite or safe execution path prevents execution; no result is claimed.
+- `AWAITING_INDEPENDENT_REVIEW` — live execution evidence is recorded, but an independent reviewer has not accepted it.
+- `FAIL` — a live execution produced a failing security outcome; retain its provenance and evidence without claiming approval.
+- `PASS` — the live test passed and the required independent review is recorded as approved.
 
-Environment values are `NOT_STARTED`, `SYNTHETIC`, and `GOOGLE_LIVE`. A `VERIFIED` case must identify the live environment, a valid timezone-aware timestamp, full source commit SHA, expected and observed outcomes, sanitized relative evidence reference, authorized project-owner verifier, and an independent-review record. Synthetic/mock methods cannot qualify.
+Environment values remain `NOT_STARTED`, `SYNTHETIC`, and `GOOGLE_LIVE`. A `PASS` case must identify the live environment, a valid timezone-aware timestamp, full source commit SHA, expected and observed outcomes, sanitized relative evidence reference, authorized project-owner verifier, and independent-review record. An `AWAITING_INDEPENDENT_REVIEW` case must contain the same execution provenance but must not claim completed review. Synthetic/mock methods cannot qualify.
 
 The manifest separately records `evidenceAssessmentStatus` and the effective `gateStatus`. The effective gate is deliberately constrained to `BLOCKED` by this validator. Unknown fields are rejected. The `--enforce-live-gate` flag intentionally exits non-zero even when the manifest claims every case is verified. No command-line flag, workflow variable, or manifest field grants release authorization.
 

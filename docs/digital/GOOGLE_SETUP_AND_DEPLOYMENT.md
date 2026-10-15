@@ -1,53 +1,69 @@
-# Google Setup and Deployment — Stage 5.1
+# Google Setup and Deployment — Stage 5.2
 
-## Status
+## Status and boundary
 
-This guide prepares a future authorized Google Apps Script project. Committing `apps-script/` does **not** create a Google project, spreadsheet, AppSheet app, API deployment, WhatsApp integration, or deployed service. No Google account or live resource was accessed as part of repository implementation.
+Stage 5.2 adds Apps Script-compatible backend modules and local tests. It does **not** mean a Google project, spreadsheet, AppSheet app, WhatsApp integration, or production service is deployed. No live Google account/project was available to verify in this repository implementation.
 
-## Local validation tests
+## Modules
 
-Requirements: a supported Node.js version with the built-in test runner (`node --test`; Node 18+ recommended). No third-party packages are required.
+- `identity.js`: reads the active Apps Script user email and fails closed if unavailable. Email availability depends on execution/deployment context; this adapter is not proof that every target account will be identifiable.
+- `authorization.js`: central membership, role, organization status, service-enabled, and record-scope policy.
+- `sheetsRepository.js`: allow-listed sheet names, required headers, stable ID lookups, duplicate-row detection, and formula-leading string escaping.
+- `audit.js`: safe structured audit writes and fail-closed result when persistence fails.
+- `idempotency.js`: durable row reservation under a ScriptLock, duplicate/conflicting payload detection, and safe lock/store errors.
+- `service.js`: injected application service; currently exposes only a minimal organization-summary read.
+- `entrypoints.js`: controlled Apps Script function; no public `doGet` or `doPost` endpoint is exposed.
 
-From the repository root, run:
+## Deployment and identity decision
+
+The initial implementation is intended for a **restricted Apps Script project invoked by signed-in, authorized Google users**, with execution identity behavior confirmed in the actual deployment. The entry point uses `Session.getActiveUser().getEmail()`; Apps Script may return an empty email in some contexts. It fails closed when empty. Do not deploy it to execute as the owner for anonymous/public callers and assume it identifies the caller.
+
+Before use, verify identity for the exact account types, domain settings, deployment mode, and caller access policy. If intended company owners cannot be reliably identified, do not expose this entry point; choose a reviewed authenticated architecture first. Caller-supplied identity, role, and membership are never accepted as proof.
+
+## Required Script Property and sheets
+
+Set Script Property `RECLAIM_SPREADSHEET_ID` to the dedicated synthetic-data test spreadsheet ID. Do not put the ID or credentials in source control. Create these sheets with exact header rows:
+
+- `Organizations`: `organizationId, organizationName, country, currency, status, serviceEnabled, configVersion, createdAt, updatedAt`
+- `Memberships`: `membershipId, organizationId, actorId, role, status, createdAt, updatedAt, revokedAt`
+- `AuditEvents`: `eventId, timestamp, actorId, organizationId, action, outcome, reasonCode, operationId, recordRef, configVersion`
+- `Idempotency`: `operationId, actorId, organizationId, operationType, payloadDigest, status, resultRef, createdAt, updatedAt`
+
+Protect the spreadsheet so only project administrators and the required script execution identity can access it. Spreadsheet IDs are locators, not authorization. Do not share the underlying workbook with company owners unless a separate reviewed security design proves direct access cannot bypass the application boundary.
+
+## Local tests
+
+Use Node.js 22 and run:
 
 ```sh
-node --test apps-script/tests/validation.test.js
+node --test apps-script/tests/*.test.js
+python scripts/validate_stage4.py
 ```
 
-The tests load the pure `apps-script/src/validation.js` module in a Node VM. This validates deterministic rules only. It does not verify Google authentication, Apps Script permissions, Google Sheets isolation, AppSheet security, webhook signatures, quota behavior, or production idempotency.
+Tests use synthetic data and test doubles. They do not prove live Apps Script identity, actual Sheets permissions, concurrency across Google executions, AppSheet isolation, or deployed security.
 
-## Create an authorized Apps Script project
+## Important limitations to close before production
 
-1. Use the project owner's authorized Google account and create a dedicated test spreadsheet with synthetic records only.
-2. Create a standalone Apps Script project (or a container-bound project if a reviewed operational need requires it). Set the project timezone deliberately; the manifest currently uses `Africa/Gaborone` as a default for initial development, not as a substitute for storing consistent UTC timestamps.
-3. Copy the pure validation source into the Apps Script project in a compatible script file. The source uses a global namespace and avoids CommonJS imports so it can run in Apps Script V8 and Node tests.
-4. Keep Google service adapters separate from pure validation. Before any read/write endpoint is exposed, derive the caller identity from a verified Apps Script execution context and load current membership from a protected, administrator-controlled source. Never trust a caller-supplied email, role, or organization ID as authentication.
-5. Establish organization membership, organization status, plan/workflow policy, and record scope checks on every operation. Default-deny when identity, membership, configuration, or scope is missing.
-6. Store deployment-specific identifiers and secrets in approved script properties or a suitable secret facility, not source code, sheet cells, URLs, logs, or fixtures. Grant only required scopes and review every authorization prompt.
-7. Test with synthetic accounts/organizations for direct reads/writes, cross-organization access, revoked memberships, suspended organizations, replayed operation IDs, error redaction, and audit coverage before connecting real operational data.
+- **Not a full transaction:** Sheets writes across multiple rows are not atomic. The idempotency adapter reserves a PROCESSING record under ScriptLock, but Stage 5.2 does not yet implement safe completion updates, interrupted-write reconciliation, or automatic stale-operation recovery. Do not use it as complete production idempotency yet.
+- **Digest responsibility:** the caller/service must calculate a stable payload digest on the server; never trust a caller-provided digest in a public API.
+- **Authorization integration:** policy modules are tested, but every future read/write service must call them using membership and organization records loaded from trusted repository methods. Platform-admin membership resolution still needs an explicit global-admin lookup path before admin actions are implemented.
+- **Sheet writes:** formula-leading strings are escaped, but date/number validation and field-specific schema validation remain required for each operational write.
+- **Audit guarantees:** audit helper reports failure, but mutation orchestration must stop or reconcile if required audit persistence fails.
+- **Schema version:** required headers are checked; the current adapter does not yet persist or enforce a versioned migration registry.
+- **Performance and quotas:** repository lookups currently read configured tables; measure scale and quota behavior before real use.
 
-## AppSheet setup gates
+## Test-project procedure
 
-- Build separate administrator and company-owner experiences only after the data source and server-side policy are reviewed.
-- Require authenticated access and verify the actual AppSheet plan and security-filter capabilities in the owner's account.
-- Treat views, slices, navigation, and client filters as usability controls, not the sole security boundary.
-- Prove negative cross-organization access tests across views, direct source access, exports, references, and actions.
-- Ensure developer monitoring uses least privilege and does not silently impersonate company owners.
+1. Create a dedicated Apps Script project and synthetic test spreadsheet.
+2. Add the source files and manifest to the Apps Script project; configure `RECLAIM_SPREADSHEET_ID`.
+3. Grant only required scopes and test with two synthetic company-owner accounts plus a platform administrator.
+4. Verify active-user identity under the exact intended deployment. Confirm empty/unavailable identity is denied.
+5. Test cross-organization access, revoked memberships, suspended organizations, missing headers, duplicate IDs, audit failures, and repeated operation IDs.
+6. Record the deployment mode, test identities, timestamps, observed outcomes, and commit SHA. Do not record tokens or participant data.
+7. Keep production deployment disabled until identity, durable idempotency recovery, audit failure policy, and direct spreadsheet access have passed review.
 
-## WhatsApp and QR entry points
+## Rollback
 
-Use organization-specific links/QRs only as routing and attribution. Validate organization status and permitted workflow server-side; links and QR contents do not authenticate participants. Before provider integration, document the provider, webhook signature method, timestamp/replay policy, idempotency persistence, retries, outbound delivery semantics, failure alerts, pricing and data handling. No provider is selected or connected by this repository change.
+Disable the test deployment or remove its invocation permissions; preserve audit evidence. Restore the previous source revision using version control. Do not delete operational records to roll back code. Rotate/revoke credentials if exposure is suspected.
 
-## Deployment, rollback, and operations
-
-- Use separate test and production projects/spreadsheets where feasible.
-- Record the source commit/version and deployment version in an audit/change record.
-- Deploy only after review, authorization checks and test evidence; do not make an unreviewed public web-app deployment.
-- Test backups and restoration using synthetic data; define retention and recovery objectives.
-- Monitor execution failures, quota limits, stale jobs, authorization denials, data-quality errors, and integration failures only for components that are actually connected.
-- Document how to revoke user membership and credentials, disable a deployment, rotate secrets, and investigate incidents.
-- Review Apps Script quotas, execution limits, account policies, AppSheet licensing and security capabilities against actual expected usage before production.
-
-## Known implementation gaps
-
-At this stage there is no Google identity adapter, protected Sheets repository, durable idempotency store, audit persistence, organization registration UI, AppSheet app, WhatsApp provider adapter, QR generation service, GPS capture flow, payment confirmation workflow, scheduled job, monitoring deployment, backup job, or production deployment. These must be implemented and verified in later stages. The test registry is deliberately in-memory and is not production duplicate protection.
+No Google deployment, AppSheet app, WhatsApp provider, QR service, GPS flow, payment gateway, or production monitoring has been created by these repository changes.

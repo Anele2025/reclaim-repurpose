@@ -162,7 +162,6 @@ def add_handover(data, path=None):
         if not collection: raise ValueError("Collection does not exist")
         if not partner: raise ValueError("Recovery partner does not exist")
         if collection["unit"] != unit: raise ValueError("Handover unit must match collection unit")
-        if collection["country"] if "country" in collection.keys() else False: pass
         if partner["country"] != db.execute("SELECT country FROM sites WHERE id=?",(collection["site_id"],)).fetchone()["country"]:
             raise ValueError("Partner and collection site must be in the same country")
         if offered > collection["quantity"] + 0.000001:
@@ -264,7 +263,7 @@ def render(db, notice="", error=""):
     forms.append(form("Add compliance action","compliance",select_field("Country","country",COUNTRIES.keys())+'<label>Site (optional)<select name="site_id"><option value="">No site linked</option>'+site_opts+'</select></label>'+field("Activity","activity")+field("Requirement / question to verify","requirement")+select_field("Status","status",sorted(COMPLIANCE_STATUS))+field("Evidence reference (required for APPROVED)","evidence_ref","text",False)+field("Next action","next_action","text",False)+field("Review date","review_date","date",False)))
     panels = ''.join('<section class="panel"><h2>%s</h2><p><a href="/export/%s">Export CSV</a></p>%s</section>'%(esc(TABLES[k][0]),k,table_html(k)) for k in TABLES)
     return """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RECLAIM & REPURPOSE — Operations</title><style>
-:root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#18251f;background:#f3f6f3}body{margin:0}header{background:#183d2b;color:white;padding:1.5rem max(1rem,calc((100vw - 1180px)/2))}header p{margin:.4rem 0;color:#d9e7dc}.wrap{max-width:1180px;margin:auto;padding:1rem}.notice{padding:.8rem;border-radius:8px;background:#e2f3e7}.error{padding:.8rem;border-radius:8px;background:#ffe4e1;color:#782b22}.warning{border:1px solid #c6a55a;background:#fff9e9;padding:1rem;border-radius:8px}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.7rem;margin:1rem 0}.metric,.panel{background:white;border:1px solid #dce5dd;border-radius:10px;padding:1rem}.metric strong{display:block;font-size:1.8rem}.metric span{color:#4c6255}.forms{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:1rem}.panel h2{margin-top:0;font-size:1.15rem}form{display:grid;gap:.7rem}label{display:grid;gap:.25rem;font-size:.9rem}input,select{width:100%;box-sizing:border-box;padding:.65rem;border:1px solid #b9c8bc;border-radius:6px;font:inherit;background:white}button{padding:.7rem 1rem;background:#246443;color:white;border:0;border-radius:6px;font:inherit;cursor:pointer}button:hover{background:#174b30}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;font-size:.88rem}th,td{text-align:left;padding:.55rem;border-bottom:1px solid #e1e8e2;white-space:nowrap}th{background:#f5f8f5}.empty{color:#627168}a{color:#175e3b}footer{color:#59675e;padding:1rem 0;font-size:.9rem}@media(min-width:900px){.records{display:grid;grid-template-columns:1fr 1fr;gap:1rem}.records .panel{min-width:0}}</style></head><body><header><h1>RECLAIM & REPURPOSE</h1><p>Operational records · Botswana and Eswatini</p></header><main class="wrap">
+:root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#18251f;background:#f3f6f3}body{margin:0}header{background:#183d2b;color:white;padding:1.5rem max(1rem,calc((100vw - 1180px)/2))}header p{margin:.4rem 0;color:#d9e7dc}.wrap{max-width:1180px;margin:auto;padding:1rem}.notice{padding:.8rem;border-radius:8px;background:#e2f3e7}.error{padding:.8rem;border-radius:8px;background:#ffe4e1;color:#782b22}.warning{border:1px solid #c6a55a;background:#fff9e9;padding:1rem;border-radius:8px}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.7rem;margin:1rem 0}.metric,.panel{background:white;border:1px solid #dce5dd;border-radius:10px;padding:1rem}.metric strong{display:block;font-size:1.8rem}.metric span{color:#4c6255}.forms{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%%,340px),1fr));gap:1rem}.panel h2{margin-top:0;font-size:1.15rem}form{display:grid;gap:.7rem}label{display:grid;gap:.25rem;font-size:.9rem}input,select{width:100%;box-sizing:border-box;padding:.65rem;border:1px solid #b9c8bc;border-radius:6px;font:inherit;background:white}button{padding:.7rem 1rem;background:#246443;color:white;border:0;border-radius:6px;font:inherit;cursor:pointer}button:hover{background:#174b30}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;font-size:.88rem}th,td{text-align:left;padding:.55rem;border-bottom:1px solid #e1e8e2;white-space:nowrap}th{background:#f5f8f5}.empty{color:#627168}a{color:#175e3b}footer{color:#59675e;padding:1rem 0;font-size:.9rem}@media(min-width:900px){.records{display:grid;grid-template-columns:1fr 1fr;gap:1rem}.records .panel{min-width:0}}</style></head><body><header><h1>RECLAIM & REPURPOSE</h1><p>Operational records · Botswana and Eswatini</p></header><main class="wrap">
 <div class="warning"><strong>Development prototype — local use only.</strong> This application has no user authentication and must not be exposed to the public internet or used to store sensitive personal data. Records do not authorize physical operations. A recorded handover is not proof of recycling.</div>
 %s%s<div class="metrics">%s</div><h2>Record operations</h2><div class="forms">%s</div><h2>Operational records</h2><div class="records">%s</div><footer>Currency remains country-specific: Botswana = BWP; Eswatini = SZL. Empty records are shown as empty; no demo activity is fabricated.</footer></main></body></html>""" % (
         '<p class="notice">'+esc(notice)+'</p>' if notice else '',
@@ -278,14 +277,13 @@ def application(environ, start_response):
         if table not in TABLES:
             start_response("404 Not Found",[("Content-Type","text/plain; charset=utf-8")]); return [b"Unknown export"]
         with connect() as db:
-            rows = query_rows(db,table)
+            cursor = db.execute(TABLES[table][1])
+            rows = cursor.fetchall()
+            columns = [column[0] for column in cursor.description]
             output = io.StringIO(newline="")
             writer = csv.writer(output)
-            if rows:
-                writer.writerow(rows[0].keys())
-                for row in rows: writer.writerow([row[k] for k in row.keys()])
-            else:
-                writer.writerow([key for key in TABLES[table][1].split("SELECT ",1)[1].split(" FROM ",1)[0].replace(" ","").split(",")])
+            writer.writerow(columns)
+            for row in rows: writer.writerow([row[k] for k in columns])
             body = output.getvalue().encode("utf-8")
         start_response("200 OK",[("Content-Type","text/csv; charset=utf-8"),("Content-Disposition",'attachment; filename="%s.csv"'%table),("Content-Length",str(len(body)))])
         return [body]

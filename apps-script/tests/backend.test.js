@@ -182,6 +182,7 @@ test("idempotency fails closed on lock failure and retains unresolved PROCESSING
     { membershipId: "ADMIN1", actorId: "admin@example.invalid", organizationId: "PLATFORM", role: "PLATFORM_ADMIN", status: "ACTIVE" }
   ], { canAcquire: false });
   assert.equal(f.service.setOrganizationServiceEnabled({ organizationId: "ORG_A", serviceEnabled: false, operationId: "op-admin-0006" }).error.code, "LOCK_UNAVAILABLE");
+  f.lockState.canAcquire = true;
   f.state.operations["op-admin-0007"] = { operationId: "op-admin-0007", actorId: "admin@example.invalid", organizationId: "ORG_A", operationType: "SET_ORGANIZATION_SERVICE", payloadDigest: "test-digest:{\"organizationId\":\"ORG_A\",\"serviceEnabled\":false}", status: "PROCESSING" };
   assert.equal(f.service.setOrganizationServiceEnabled({ organizationId: "ORG_A", serviceEnabled: false, operationId: "op-admin-0007" }).error.code, "RECONCILIATION_REQUIRED");
   assert.equal(f.state.organizations.ORG_A.serviceEnabled, true);

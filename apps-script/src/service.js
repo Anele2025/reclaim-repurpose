@@ -156,7 +156,15 @@ var ReclaimService = (function () {
       });
       if (!result.ok) {
         var err = result.error || {};
+        var failureAudit = audit(context, "SET_ORGANIZATION_SERVICE", "FAILED", err.code || "REQUEST_FAILED", request.operationId, target);
+        if (!failureAudit.ok && err.code !== "RECONCILIATION_REQUIRED") {
+          return safe("AUDIT_UNAVAILABLE", "Request could not be safely completed.", correlationId);
+        }
         return safe(err.code || "REQUEST_FAILED", err.message || "Request could not be completed.", correlationId);
+      }
+      if (result.replayed === true) {
+        var replayAudit = audit(context, "SET_ORGANIZATION_SERVICE_REPLAY", "REPLAYED", "", request.operationId, target);
+        if (!replayAudit.ok) return safe("AUDIT_UNAVAILABLE", "Request could not be safely completed.", correlationId);
       }
       return { ok: true, value: result.value, replayed: result.replayed === true, correlationId: correlationId };
     }

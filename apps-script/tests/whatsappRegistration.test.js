@@ -168,9 +168,10 @@ test("success is never claimed when registration persistence throws or is not du
   for (const opts of [{ persistThrows: true }, { persistNotDurable: true }]) {
     const f = fixture(opts); beginNameLocationConfirm(f);
     const result = send(f.api, txt("e4", "CONFIRM"));
-    assert.equal(result.results[0].code, "PERSISTENCE_UNAVAILABLE");
-    assert.notEqual(result.results[0].code, "REGISTERED");
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "PROCESSING_RETRYABLE");
     assert.equal(f.state.sessions.size, 1);
+    assert.equal(f.state.registrations.length, 0);
   }
 });
 test("expired session restarts rather than submitting stale information", () => {
@@ -215,4 +216,34 @@ test("uncertain event completion never reports successful processing", () => {
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "EVENT_STORE_UNAVAILABLE");
   assert.equal(f.state.sessions.size, 1);
+});
+
+
+test("registration retries reuse stable registration and operation IDs", () => {
+  const f = fixture();
+  beginNameLocationConfirm(f);
+  const session = f.state.sessions.get("ORG_A|whatsapp:+26770000001");
+  assert.equal(typeof session.registrationId, "string");
+  assert.equal(typeof session.operationId, "string");
+  const expectedRegistrationId = session.registrationId;
+  const expectedOperationId = session.operationId;
+  const persist = f.deps.createRegistration;
+  let attempts = 0;
+  let firstRequest;
+  f.deps.createRegistration = request => {
+    attempts++;
+    if (attempts === 1) { firstRequest = request; throw new Error("transient write failure"); }
+    return persist(request);
+  };
+  const first = send(f.api, txt("e4", "CONFIRM"));
+  assert.equal(first.ok, false);
+  assert.equal(first.error.code, "PROCESSING_RETRYABLE");
+  assert.equal(firstRequest.registrationId, expectedRegistrationId);
+  assert.equal(firstRequest.operationId, expectedOperationId);
+  const retry = send(f.api, txt("e4", "CONFIRM"));
+  assert.equal(retry.ok, true);
+  assert.equal(retry.results[0].code, "REGISTERED");
+  assert.equal(f.state.registrations.length, 1);
+  assert.equal(f.state.registrations[0].registrationId, expectedRegistrationId);
+  assert.equal(f.state.registrations[0].operationId, expectedOperationId);
 });

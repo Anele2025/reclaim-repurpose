@@ -144,3 +144,22 @@ The live gate remains **BLOCKED / NOT VERIFIED** until an authorized dedicated A
 ### Stage 5.9 verification boundary
 
 Tests exercise the provider-independent state machine with synthetic in-memory adapters. They do not verify an actual provider signature, provider webhook challenge, outbound WhatsApp delivery, atomic persistence under concurrent Apps Script executions, live Google Sheets, Apps Script deployment, or production credentials. A passing CI run is not evidence of live integration or production readiness.
+
+
+## Stage 5.10 — recoverable event-processing adapter contract
+
+**Provider decision:** no WhatsApp provider is selected in this repository state. This increment does not implement provider-specific signature verification, a provider verification challenge, outbound WhatsApp delivery, or a public webhook endpoint.
+
+The provider-independent registration workflow now requires explicit event lifecycle methods (`begin`, `complete`, and `release`) and a per-organization/per-sender session-lock adapter (`withSenderLock`). The event adapter must distinguish a new event, a completed replay, a conflicting event ID, and an event already in progress. Session transitions mark the provider event ID so a retry can detect a transition that persisted before event completion failed. A session-write failure releases a processing claim for retry; an event-completion failure returns a retryable failure rather than claiming success.
+
+**This is an adapter contract, not a production durable-store implementation.** The current tests use in-memory synthetic adapters. They do not provide cross-execution locking, durable leases, atomic event/session transactions, or crash recovery across independent Google Sheets writes. A production adapter must provide atomic event claiming and completion, expiry/lease recovery for abandoned PROCESSING claims, safe per-sender locking, and a stable idempotency key for registration persistence. It must also recover safely if registration persistence succeeds but event completion or outbound message delivery fails. Do not deploy with the test adapters.
+
+The confirmation transition now allocates and persists a registration ID and operation ID before attempting registration storage. Retries reuse those same identifiers instead of generating a new idempotency key. A workflow-level persistence failure is returned as an overall retryable failure, not as an overall successful webhook result. This protects the retry contract only when the eventual registration adapter actually enforces idempotency for the stable operation ID.
+
+The session marker reduces duplicate state transitions after a successful session write, but it cannot make two separate stores transactional. In particular, if registration persistence succeeds and the event-completion write fails, the event remains uncertain until the production adapter's recovery process reconciles it against the stable registration operation ID. Do not retry that submission with newly generated IDs or claim end-to-end exactly-once processing without verified idempotent storage.
+
+### Verification boundary
+
+Automated tests now cover event lifecycle statuses, conflicting IDs, duplicate/in-progress handling, retry after a session-write failure, uncertain completion errors, and the existing registration conversation. The tests use in-memory adapters and synchronous lock simulation. They do not prove concurrency safety or durability in Apps Script/Google Sheets.
+
+Before provider-specific implementation, select a provider and verify its official raw-body authentication, receiving-account identity, event IDs, challenge, acknowledgement/retry, inbound location payload, outbound-message and rate-limit requirements. The selected provider's receiving-account identity must map through administrator-controlled configuration to exactly one active organization. Secrets must be stored in supported deployment configuration and must never be committed to source.

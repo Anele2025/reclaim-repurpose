@@ -7,11 +7,13 @@ on:
       - stage-5-5-3-security-evidence-gate
       - stage-5-5-10-owner-evidence-statuses
       - stage-5-6-waste-collection-workflow
+      - stage-5-9-whatsapp-registration
   push:
     branches:
       - stage-5-5-3-security-evidence-gate
       - stage-5-5-4-evidence-gate-hardening
       - stage-5-6-waste-collection-workflow
+      - stage-5-10-whatsapp-durable-boundary
 
 permissions:
   contents: read

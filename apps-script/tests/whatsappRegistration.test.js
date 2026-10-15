@@ -9,22 +9,37 @@ const context = vm.createContext({ Object, Array, String, Number, Date, RegExp, 
 vm.runInContext(source, context, { filename: "whatsappRegistration.js" });
 const moduleUnderTest = context.ReclaimWhatsAppRegistration;
 function fixture(options = {}) {
-  const state = { sessions: new Map(), events: new Map(), registrations: [], parseCalls: 0, verifyCalls: 0, routeCalls: 0, nextId: 0 };
+  const state = { sessions: new Map(), events: new Map(), registrations: [], parseCalls: 0, verifyCalls: 0, routeCalls: 0, nextId: 0, sessionPutCalls: 0 };
   const key = (org, sender) => org + "|" + sender;
   const deps = {
     verifyWebhook: () => { state.verifyCalls++; return options.verified !== false; },
     parseWebhook: request => { state.parseCalls++; if (options.parseThrows) throw new Error("bad"); return request.payload; },
     resolveOrganization: request => { state.routeCalls++; return Object.prototype.hasOwnProperty.call(options, "organization") ? options.organization : (request.trustedRoute || ""); },
     digestEvent: event => JSON.stringify({ eventId: event.eventId, senderId: event.senderId, type: event.type, text: event.text, latitude: event.latitude, longitude: event.longitude }),
-    eventStore: { claim(id, digest, org) {
-      const previous = state.events.get(id);
-      if (!previous) { state.events.set(id, { digest, org }); return { status: "NEW" }; }
-      return { status: previous.digest === digest && previous.org === org ? "REPLAY" : "CONFLICT" };
-    } },
+    eventStore: {
+      begin(id, digest, org) {
+        const previous = state.events.get(org + "|" + id);
+        if (!previous) { state.events.set(org + "|" + id, { digest, org, status: "PROCESSING" }); return { status: "NEW" }; }
+        if (previous.digest !== digest || previous.org !== org) return { status: "CONFLICT" };
+        if (previous.status === "COMPLETE") return { status: "REPLAY", result: previous.result };
+        return { status: "IN_PROGRESS" };
+      },
+      complete(id, digest, org, result) {
+        if (options.failComplete) throw new Error("completion unavailable");
+        const key = org + "|" + id, previous = state.events.get(key);
+        if (!previous || previous.digest !== digest || previous.status !== "PROCESSING") throw new Error("claim mismatch");
+        state.events.set(key, { digest, org, status: "COMPLETE", result });
+      },
+      release(id, digest, org) {
+        const key = org + "|" + id, previous = state.events.get(key);
+        if (previous && previous.digest === digest && previous.status === "PROCESSING") state.events.delete(key);
+      }
+    },
     sessionStore: {
       get: (org, sender) => state.sessions.get(key(org, sender)) || null,
-      put: (org, sender, value) => state.sessions.set(key(org, sender), JSON.parse(JSON.stringify(value))),
-      remove: (org, sender) => state.sessions.delete(key(org, sender))
+      put: (org, sender, value) => { state.sessionPutCalls++; if (options.failFirstSessionPut && state.sessionPutCalls === 1) throw new Error("session unavailable"); state.sessions.set(key(org, sender), JSON.parse(JSON.stringify(value))); },
+      remove: (org, sender) => state.sessions.delete(key(org, sender)),
+      withSenderLock: (org, sender, callback) => callback()
     },
     createRegistration: request => {
       if (options.persistThrows) throw new Error("write failed");
@@ -153,9 +168,10 @@ test("success is never claimed when registration persistence throws or is not du
   for (const opts of [{ persistThrows: true }, { persistNotDurable: true }]) {
     const f = fixture(opts); beginNameLocationConfirm(f);
     const result = send(f.api, txt("e4", "CONFIRM"));
-    assert.equal(result.results[0].code, "PERSISTENCE_UNAVAILABLE");
-    assert.notEqual(result.results[0].code, "REGISTERED");
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "PROCESSING_RETRYABLE");
     assert.equal(f.state.sessions.size, 1);
+    assert.equal(f.state.registrations.length, 0);
   }
 });
 test("expired session restarts rather than submitting stale information", () => {
@@ -176,4 +192,58 @@ test("provider event batches are bounded", () => {
   const f = fixture();
   const result = f.api.handleWebhook({ trustedRoute: "ORG_A", payload: { events: Array.from({ length: 21 }, (_, i) => txt("e"+i, "hello")) } });
   assert.equal(result.error.code, "INVALID_WEBHOOK");
+});
+
+test("failed session write releases the event for a safe retry", () => {
+  const f = fixture({ failFirstSessionPut: true });
+  const first = send(f.api, txt("retry-event", "hello"));
+  assert.equal(first.error.code, "SESSION_STORE_UNAVAILABLE");
+  assert.equal(f.state.sessions.size, 0);
+  const retry = send(f.api, txt("retry-event", "hello"));
+  assert.equal(retry.results[0].code, "CONTINUE");
+  assert.equal(f.state.sessions.size, 1);
+});
+test("in-progress duplicate event does not mutate session state", () => {
+  const f = fixture();
+  f.state.events.set("ORG_A|busy-event", { digest: JSON.stringify({ eventId: "busy-event", senderId: "whatsapp:+26770000001", type: "text", text: "hello" }), org: "ORG_A", status: "PROCESSING" });
+  const result = send(f.api, txt("busy-event", "hello"));
+  assert.equal(result.results[0].code, "EVENT_IN_PROGRESS");
+  assert.equal(f.state.sessions.size, 0);
+});
+test("uncertain event completion never reports successful processing", () => {
+  const f = fixture({ failComplete: true });
+  const result = send(f.api, txt("complete-failure", "hello"));
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "EVENT_STORE_UNAVAILABLE");
+  assert.equal(f.state.sessions.size, 1);
+});
+
+
+test("registration retries reuse stable registration and operation IDs", () => {
+  const f = fixture();
+  beginNameLocationConfirm(f);
+  const session = f.state.sessions.get("ORG_A|whatsapp:+26770000001");
+  assert.equal(typeof session.registrationId, "string");
+  assert.equal(typeof session.operationId, "string");
+  const expectedRegistrationId = session.registrationId;
+  const expectedOperationId = session.operationId;
+  const persist = f.deps.createRegistration;
+  let attempts = 0;
+  let firstRequest;
+  f.deps.createRegistration = request => {
+    attempts++;
+    if (attempts === 1) { firstRequest = request; throw new Error("transient write failure"); }
+    return persist(request);
+  };
+  const first = send(f.api, txt("e4", "CONFIRM"));
+  assert.equal(first.ok, false);
+  assert.equal(first.error.code, "PROCESSING_RETRYABLE");
+  assert.equal(firstRequest.registrationId, expectedRegistrationId);
+  assert.equal(firstRequest.operationId, expectedOperationId);
+  const retry = send(f.api, txt("e4", "CONFIRM"));
+  assert.equal(retry.ok, true);
+  assert.equal(retry.results[0].code, "REGISTERED");
+  assert.equal(f.state.registrations.length, 1);
+  assert.equal(f.state.registrations[0].registrationId, expectedRegistrationId);
+  assert.equal(f.state.registrations[0].operationId, expectedOperationId);
 });

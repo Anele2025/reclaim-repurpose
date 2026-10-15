@@ -12,7 +12,9 @@ var ReclaimService = (function () {
     }
     function now() { return deps.clock && deps.clock.now ? deps.clock.now() : new Date().toISOString(); }
     function actor() {
-      var result = deps.identity.resolveCurrentActor(deps.session);
+      var result;
+      try { result = deps.identity.resolveCurrentActor(deps.session); }
+      catch (_) { result = null; }
       return result && result.ok && typeof result.actorId === "string" && result.actorId.trim()
         ? { ok: true, actorId: result.actorId.trim().toLowerCase() }
         : { ok: false, error: { code: "IDENTITY_UNAVAILABLE", message: "Identity could not be established." } };
@@ -260,6 +262,10 @@ var ReclaimService = (function () {
     }
     function getCollectionRecord(request) {
       var correlationId = id(), target = request && request.organizationId, recordId = request && request.collectionId;
+      if (!request || typeof request !== "object" || Array.isArray(request) ||
+          Object.keys(request).some(function (key) { return ["organizationId","collectionId"].indexOf(key) < 0; })) {
+        return denied({ error: { code: "INVALID_REQUEST", message: "Request fields are invalid." } }, "READ_COLLECTION_RECORD", correlationId, target);
+      }
       if (typeof recordId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(recordId)) return denied({ error: { code: "INVALID_COLLECTION_ID", message: "Collection record ID is invalid." } }, "READ_COLLECTION_RECORD", correlationId, target);
       var context = contextFor(target, "COMPANY_OWNER", false);
       if (!context.ok) return denied(context, "READ_COLLECTION_RECORD", correlationId, target);
@@ -325,7 +331,12 @@ var ReclaimService = (function () {
         Object.keys(changes).forEach(function (key) { value[key] = changes[key]; });
         return { ok: true, recordRef: request.collectionId, value: value };
       });
-      if (!result.ok) return safe(result.error && result.error.code || "REQUEST_FAILED", result.error && result.error.message || "Request could not be completed.", correlationId);
+      if (!result.ok) {
+        var handoverError = result.error || {};
+        var failureEvent = audit(context, "RECORD_COLLECTION_HANDOVER", "FAILED", handoverError.code || "REQUEST_FAILED", request.operationId, request.collectionId);
+        if (!failureEvent.ok && handoverError.code !== "RECONCILIATION_REQUIRED") return safe("AUDIT_UNAVAILABLE", "Request could not be safely completed.", correlationId);
+        return safe(handoverError.code || "REQUEST_FAILED", handoverError.message || "Request could not be completed.", correlationId);
+      }
       if (result.replayed && !audit(context, "RECORD_COLLECTION_HANDOVER_REPLAY", "REPLAYED", "", request.operationId, request.collectionId).ok) return safe("AUDIT_UNAVAILABLE", "Request could not be safely completed.", correlationId);
       return { ok: true, value: result.value, replayed: result.replayed === true, correlationId: correlationId };
     }

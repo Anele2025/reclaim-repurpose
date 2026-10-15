@@ -8,6 +8,11 @@ function reclaimGetMyOrganizationSummary(organizationId) {
 function reclaimSetOrganizationServiceEnabled(request) {
   return reclaimCreateService().setOrganizationServiceEnabled(request);
 }
+function reclaimCreateCollectionSite(request) { return reclaimCreateService().createCollectionSite(request); }
+function reclaimGetCollectionSite(request) { return reclaimCreateService().getCollectionSite(request); }
+function reclaimListCollectionSites(request) { return reclaimCreateService().listCollectionSites(request); }
+function reclaimUpdateCollectionSite(request) { return reclaimCreateService().updateCollectionSite(request); }
+function reclaimDeactivateCollectionSite(request) { return reclaimCreateService().deactivateCollectionSite(request); }
 function reclaimRecordCollection(request) {
   return reclaimCreateService().recordCollection(request);
 }

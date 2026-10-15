@@ -47,7 +47,7 @@
 - The representative mutation covers only serviceEnabled; broad organization/membership CRUD and operational-record workflows remain out of scope.
 - The Idempotency sheet header has changed. No live sheet is verified; do not apply a silent migration to any real workbook.
 - Google Sheets direct-access permissions, AppSheet security filters, WhatsApp integration, production monitoring, quota behavior, backup/restore, and deployment security remain unverified.
-- GitHub Actions run 38734560072 completed successfully for head SHA 1281c2cdfad5aec893ec4fd83813506da2c32b4c. Its Node.js 22 Apps Script-compatible test step and Stage 4 structural/link validator both completed successfully. This verifies automated repository checks only; code review and live Google integration remain pending.
+- GitHub Actions run 38734843323 completed successfully for head SHA 45f91be849ec45d3b945ac23eef9fb8d4797ea54. Its Node.js 22 Apps Script-compatible test step and Stage 4 structural/link validator both completed successfully. This verifies automated repository checks only; code review and live Google integration remain pending.
 
 ## Acceptance status at audit authoring
 

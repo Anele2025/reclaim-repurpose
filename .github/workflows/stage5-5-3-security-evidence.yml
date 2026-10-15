@@ -8,6 +8,7 @@ on:
   push:
     branches:
       - stage-5-5-3-security-evidence-gate
+      - stage-5-5-4-evidence-gate-hardening
 
 permissions:
   contents: read
@@ -29,6 +30,8 @@ jobs:
           python-version: "3.x"
       - name: Run Stage 5.5.3 evidence-validator tests
         run: node --test apps-script/tests/stage5_5_3_security_evidence.test.js
+      - name: Run Stage 5.5.4 adversarial hardening tests
+        run: node --test apps-script/tests/stage5_5_4_evidence_gate_hardening.test.js
       - name: Validate evidence manifest structure
         run: node scripts/validate_security_evidence.js
       - name: Run all Apps Script-compatible tests

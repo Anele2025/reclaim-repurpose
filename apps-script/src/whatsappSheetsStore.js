@@ -376,9 +376,10 @@ var ReclaimWhatsAppSheetsStore = (function () {
           var linkedRows = record.organizationId && record.registrationId && record.operationId && record.registrationFingerprint ?
             rows("Registrations").filter(function (registration) {
               return registration.organizationId === record.organizationId &&
-                registration.registrationId === record.registrationId && registration.operationId === record.operationId;
+                (registration.registrationId === record.registrationId || registration.operationId === record.operationId);
             }) : [];
-          if (linkedRows.length === 1 && linkedRows[0].status === "SUCCEEDED" &&
+          if (linkedRows.length === 1 && linkedRows[0].registrationId === record.registrationId &&
+              linkedRows[0].operationId === record.operationId && linkedRows[0].status === "SUCCEEDED" &&
               linkedRows[0].payloadFingerprint === record.registrationFingerprint) {
             record.status = "COMPLETE"; record.claimToken = ""; record.leaseExpiresAt = "";
             record.updatedAt = stamp; record.completedAt = stamp;

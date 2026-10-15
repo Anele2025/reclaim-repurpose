@@ -141,45 +141,15 @@ Stage 4 provides research plans and blank spreadsheet-ready registers for Botswa
 The country-requirements note includes initial source leads; applicability to the actual site, material and activity remains to be verified with relevant authorities or qualified local advisers. Do not start collection, sorting, storage, transport or handover until applicable permission, safety, legal and receiving-partner requirements are satisfied. All Stage 4 CSVs are blank templates, not evidence of market validation.
 
 
-## Stage 5 — Working local MVP
 
-A local-first browser application is available in \`app.py\`. It uses Python's standard library and SQLite; it does not require a separate database server or third-party Python packages.
+## Stage 5 — Digital tracker and impact reporting (Google-first architecture)
 
-### Start the application
+Stage 5 follows the agreed architecture: **WhatsApp for participant interaction; Google Sheets for operational records; Google Apps Script and a controlled API for validation and automation; and Google AppSheet for administrator and individual-company dashboards.** Do not build a separate custom web application.
 
-Prerequisite: Python 3.10 or later.
+- [Stage 5 digital tracker specification](docs/digital/STAGE_5_DIGITAL_TRACKER_SPEC.md)
 
-From the repository root, run:
+The specification defines system requirements, the data dictionary, role-based access boundaries, dashboard requirements, automation boundaries, implementation sequence and test plan. It is designed to move software development forward while customer and recovery-partner validation proceeds in parallel.
 
-\`\`\`bash
-python -m py_compile app.py
-python app.py
-\`\`\`
+The Google Sheet and AppSheet application must be created and authorized in the owner's Google account. Source files in this repository do not themselves create cloud resources or grant access. Do not treat an AppSheet view filter as a security boundary: company-scoped data must be enforced by the data source and server-side authorization. Keep the administrator and company-owner roles separate.
 
-Open \`http://127.0.0.1:8000\` in your browser. The application creates its SQLite database at \`data/reclaim.db\` by default. To use another database file, set \`RECLAIM_DB_PATH\` before starting the application.
-
-The app currently supports creating site, recovery-partner, collection, handover, finance and compliance records; dashboard counts; basic table views; CSV exports; server-side input validation; SQLite foreign keys and constraints; and a basic creation audit log. Botswana records use BWP and Eswatini records use SZL. Handover records distinguish offered, accepted and rejected quantities. Final handover acceptance requires an evidence reference; acceptance is not represented as proof of final recycling.
-
-### Tests and structural checks
-
-Run:
-
-\`\`\`bash
-python -m unittest discover -s tests -v
-python scripts/validate_operations.py
-python scripts/validate_stage4.py
-\`\`\`
-
-GitHub Actions runs these checks on the Stage 5 branch and its pull request.
-
-### Critical limitations
-
-- This is an unauthenticated development prototype. It binds to localhost only and must not be exposed to the public internet.
-- Do not enter sensitive personal data or confidential business records.
-- It does not yet provide organization-owner accounts, multi-tenant access control, record editing/archiving workflows, production deployment, backups, or hardened production security.
-- It does not send WhatsApp messages, process payments, or verify blockchain events.
-- Material quantities and evidence references are only as reliable as the information entered. The application does not independently verify weights, partner claims, permits, or downstream recovery.
-- It does not calculate carbon savings or claim that collected or accepted material was recycled.
-- No real customer, collection, finance, permission, partner, or impact data is included.
-
-This application is a software-development milestone, not permission to begin collection, sorting, storage, transportation or handover. Those activities remain subject to the applicable requirements and verified site, safety and destination arrangements.
+The first implementation must use synthetic/test records until access controls, backup/recovery, and the workflow checks have been verified. Keep Botswana/BWP and Eswatini/SZL separate. Do not claim material was recycled or calculate environmental impact without evidence of downstream recovery. Stage 5 software work does not authorize physical operations.

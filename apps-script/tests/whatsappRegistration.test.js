@@ -9,7 +9,7 @@ const context = vm.createContext({ Object, Array, String, Number, Date, RegExp, 
 vm.runInContext(source, context, { filename: "whatsappRegistration.js" });
 const moduleUnderTest = context.ReclaimWhatsAppRegistration;
 function fixture(options = {}) {
-  const state = { sessions: new Map(), events: new Map(), registrations: [], parseCalls: 0, verifyCalls: 0, routeCalls: 0, nextId: 0 };
+  const state = { sessions: new Map(), events: new Map(), registrations: [], parseCalls: 0, verifyCalls: 0, routeCalls: 0, nextId: 0, sessionPutCalls: 0 };
   const key = (org, sender) => org + "|" + sender;
   const deps = {
     verifyWebhook: () => { state.verifyCalls++; return options.verified !== false; },
@@ -25,6 +25,7 @@ function fixture(options = {}) {
         return { status: "IN_PROGRESS" };
       },
       complete(id, digest, org, result) {
+        if (options.failComplete) throw new Error("completion unavailable");
         const key = org + "|" + id, previous = state.events.get(key);
         if (!previous || previous.digest !== digest || previous.status !== "PROCESSING") throw new Error("claim mismatch");
         state.events.set(key, { digest, org, status: "COMPLETE", result });
@@ -36,7 +37,7 @@ function fixture(options = {}) {
     },
     sessionStore: {
       get: (org, sender) => state.sessions.get(key(org, sender)) || null,
-      put: (org, sender, value) => state.sessions.set(key(org, sender), JSON.parse(JSON.stringify(value))),
+      put: (org, sender, value) => { state.sessionPutCalls++; if (options.failFirstSessionPut && state.sessionPutCalls === 1) throw new Error("session unavailable"); state.sessions.set(key(org, sender), JSON.parse(JSON.stringify(value))); },
       remove: (org, sender) => state.sessions.delete(key(org, sender)),
       withSenderLock: (org, sender, callback) => callback()
     },
@@ -190,4 +191,28 @@ test("provider event batches are bounded", () => {
   const f = fixture();
   const result = f.api.handleWebhook({ trustedRoute: "ORG_A", payload: { events: Array.from({ length: 21 }, (_, i) => txt("e"+i, "hello")) } });
   assert.equal(result.error.code, "INVALID_WEBHOOK");
+});
+
+test("failed session write releases the event for a safe retry", () => {
+  const f = fixture({ failFirstSessionPut: true });
+  const first = send(f.api, txt("retry-event", "hello"));
+  assert.equal(first.error.code, "SESSION_STORE_UNAVAILABLE");
+  assert.equal(f.state.sessions.size, 0);
+  const retry = send(f.api, txt("retry-event", "hello"));
+  assert.equal(retry.results[0].code, "CONTINUE");
+  assert.equal(f.state.sessions.size, 1);
+});
+test("in-progress duplicate event does not mutate session state", () => {
+  const f = fixture();
+  f.state.events.set("ORG_A|busy-event", { digest: JSON.stringify({ eventId: "busy-event", senderId: "whatsapp:+26770000001", type: "text", text: "hello" }), org: "ORG_A", status: "PROCESSING" });
+  const result = send(f.api, txt("busy-event", "hello"));
+  assert.equal(result.results[0].code, "EVENT_IN_PROGRESS");
+  assert.equal(f.state.sessions.size, 0);
+});
+test("uncertain event completion never reports successful processing", () => {
+  const f = fixture({ failComplete: true });
+  const result = send(f.api, txt("complete-failure", "hello"));
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "EVENT_STORE_UNAVAILABLE");
+  assert.equal(f.state.sessions.size, 1);
 });

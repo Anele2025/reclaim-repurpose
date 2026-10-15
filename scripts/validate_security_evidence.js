@@ -53,7 +53,7 @@ function hasPlaceholder(value, location) {
 function validEvidenceRef(value) {
   if (!nonEmpty(value) || value.includes("\\") || value.startsWith("/") || /^[a-z]+:\/\//i.test(value)) return false;
   const parts = value.split("/");
-  return parts.every(part => part && part !== "." && part !== "..") && !value.includes(":");
+  return parts.every(part => part && part !== "." && part !== ".." && !PLACEHOLDER_RE.test(part) && !/placeholder|example/i.test(part)) && !value.includes(":");
 }
 function validateVerifiedCase(item, index) {
   const prefix = "cases[" + index + "]";
@@ -109,13 +109,19 @@ function validateManifest(manifest) {
       fail(prefix + " review flags must be booleans");
     }
     if (item.status === "VERIFIED") validateVerifiedCase(item, i);
-    else if (item.status === "NOT_STARTED" || item.status === "BLOCKED") {
+    else if (item.status === "NOT_STARTED") {
+      if (item.environment !== "NOT_STARTED") fail(prefix + " NOT_STARTED status requires NOT_STARTED environment");
+      if (item.executedAt !== null || item.evidenceRef !== null || item.observedOutcome !== null || item.executionCommitSha !== null) {
+        fail(prefix + " cannot contain execution evidence while status is NOT_STARTED");
+      }
+    } else if (item.status === "BLOCKED") {
       if (item.executedAt !== null || item.evidenceRef !== null || item.observedOutcome !== null) {
         fail(prefix + " cannot contain execution evidence while status is " + item.status);
       }
     } else if (item.status === "IN_PROGRESS") {
       if (item.environment === "NOT_STARTED") fail(prefix + " IN_PROGRESS requires a selected environment");
     } else if (item.status === "FAILED") {
+      if (item.environment === "NOT_STARTED") fail(prefix + " FAILED requires an identified execution environment");
       if (!nonEmpty(item.observedOutcome)) fail(prefix + " FAILED requires an observed outcome");
     }
   }

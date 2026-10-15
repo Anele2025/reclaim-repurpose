@@ -98,7 +98,7 @@ var ReclaimSheetsRepository = (function () {
       }
       if (name === "CustomerRegistrations") {
         if (!/^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/.test(String(record.registrationId)) || !/^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/.test(String(record.organizationId))) throw new Error("INVALID_CUSTOMER_REGISTRATION_SCOPE");
-        if (typeof record.customerName !== "string" || !record.customerName.trim() || record.customerName.trim().length > 120 || /[\\u0000-\\u001F]/.test(record.customerName)) throw new Error("INVALID_CUSTOMER_NAME");
+        if (typeof record.customerName !== "string" || !record.customerName.trim() || record.customerName.trim().length > 120 || /[\u0000-\u001F]/.test(record.customerName)) throw new Error("INVALID_CUSTOMER_NAME");
         if (typeof record.customerPhone !== "string" || !record.customerPhone.trim() || record.customerPhone.length > 32) throw new Error("INVALID_CUSTOMER_PHONE");
         if (typeof record.locationDescription !== "string" || record.locationDescription.length > 240) throw new Error("INVALID_CUSTOMER_LOCATION");
         if (typeof record.latitude !== "number" || !isFinite(record.latitude) || record.latitude < -90 || record.latitude > 90 || typeof record.longitude !== "number" || !isFinite(record.longitude) || record.longitude < -180 || record.longitude > 180) throw new Error("INVALID_CUSTOMER_COORDINATES");

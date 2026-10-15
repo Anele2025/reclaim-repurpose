@@ -51,11 +51,16 @@ var ReclaimWhatsAppSheetsStore = (function () {
       if (!isFinite(result)) fail("CLOCK_UNAVAILABLE");
       return result;
     }
-    function newClaimToken() {
+    function newClaimToken(generation) {
       var token = typeof deps.idGenerator === "function" ? deps.idGenerator("claim") :
         (typeof Utilities !== "undefined" && typeof Utilities.getUuid === "function" ? Utilities.getUuid() : "");
       if (!nonempty(String(token || ""), 256)) fail("CLAIM_TOKEN_UNAVAILABLE");
-      return String(token);
+      // Include the persisted per-event attempt generation. If an injected or
+      // defective token source repeats its output, an old worker's token cannot
+      // become valid again when the same event is retried.
+      var fenced = String(token) + ":" + String(generation);
+      if (!nonempty(fenced, 280)) fail("CLAIM_TOKEN_UNAVAILABLE");
+      return fenced;
     }
     function withLock(callback) {
       if (lockDepth > 0) {
@@ -146,15 +151,17 @@ var ReclaimWhatsAppSheetsStore = (function () {
               }
               if (existing.status === "RECONCILIATION_REQUIRED") return { status: "UNAVAILABLE", code: "RECONCILIATION_REQUIRED" };
               if (!["RETRYABLE"].includes(existing.status)) return { status: "UNAVAILABLE", code: "EVENT_STATE_UNAVAILABLE" };
-              var token = newClaimToken();
+              var nextAttempt = Number(existing.attempts || 0) + 1;
+              if (!isFinite(nextAttempt) || nextAttempt < 1 || nextAttempt > 2147483647) fail("CLAIM_GENERATION_INVALID");
+              var token = newClaimToken(nextAttempt);
               existing.status = "PROCESSING"; existing.claimToken = token; existing.claimedAt = stamp;
-              existing.leaseExpiresAt = stamp + leaseMs; existing.attempts = Number(existing.attempts || 0) + 1;
+              existing.leaseExpiresAt = stamp + leaseMs; existing.attempts = nextAttempt;
               existing.updatedAt = stamp; existing.lastErrorCode = "";
               write("Events", existing._row, existing);
               audit("EVENT", organizationId, eventId, "RECOVERED_CLAIM", "");
               return { status: "NEW", claimToken: token };
             }
-            var claimToken = newClaimToken();
+            var claimToken = newClaimToken(1);
             write("Events", 0, { schemaVersion: VERSION, scopeKey: scope(organizationId, accountScope), organizationId: organizationId,
               eventId: eventId, digest: digest, status: "PROCESSING", claimToken: claimToken,
               claimedAt: stamp, leaseExpiresAt: stamp + leaseMs, attempts: 1, createdAt: stamp,
@@ -197,6 +204,7 @@ var ReclaimWhatsAppSheetsStore = (function () {
             var record = eventRow(organizationId, eventId, accountScope);
             if (!record || record.digest !== digest) fail("EVENT_CLAIM_MISMATCH");
             if (!nonempty(claimToken, 256) || record.claimToken !== claimToken) fail("STALE_CLAIM_TOKEN");
+            if (!result || typeof result !== "object" || result.ok !== true) fail("EVENT_RESULT_INVALID");
             if (record.status === "COMPLETE") {
               if (record.resultJson !== JSON.stringify(result)) fail("EVENT_COMPLETION_CONFLICT");
               return { ok: true, replay: true };
@@ -289,9 +297,10 @@ var ReclaimWhatsAppSheetsStore = (function () {
     }
     function registrationStore() {
       function matches(request) {
+        // Stable IDs must not be reusable in another tenant. Search globally
+        // by either identifier, then validate the full tenant/ID/fingerprint tuple.
         return rows("Registrations").filter(function (row) {
-          return row.organizationId === request.organizationId &&
-            (row.registrationId === request.registrationId || row.operationId === request.operationId);
+          return row.registrationId === request.registrationId || row.operationId === request.operationId;
         });
       }
       function fingerprint(request) {
@@ -375,10 +384,10 @@ var ReclaimWhatsAppSheetsStore = (function () {
           // matches both stable identifiers and the canonical payload fingerprint.
           var linkedRows = record.organizationId && record.registrationId && record.operationId && record.registrationFingerprint ?
             rows("Registrations").filter(function (registration) {
-              return registration.organizationId === record.organizationId &&
-                (registration.registrationId === record.registrationId || registration.operationId === record.operationId);
+              return registration.registrationId === record.registrationId || registration.operationId === record.operationId;
             }) : [];
-          if (linkedRows.length === 1 && linkedRows[0].registrationId === record.registrationId &&
+          if (linkedRows.length === 1 && linkedRows[0].organizationId === record.organizationId &&
+              linkedRows[0].registrationId === record.registrationId &&
               linkedRows[0].operationId === record.operationId && linkedRows[0].status === "SUCCEEDED" &&
               linkedRows[0].payloadFingerprint === record.registrationFingerprint) {
             record.status = "COMPLETE"; record.claimToken = ""; record.leaseExpiresAt = "";

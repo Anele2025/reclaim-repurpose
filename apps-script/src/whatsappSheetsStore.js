@@ -387,7 +387,7 @@ var ReclaimWhatsAppSheetsStore = (function () {
             record.lastErrorCode = "";
             write("Events", record._row, record);
             audit("RECONCILIATION", record.organizationId, record.eventId, "RECOVERED", "LINKED_REGISTRATION_CONFIRMED");
-            continue;
+            return;
           }
           // Expiry alone is not proof that the old execution stopped. Ambiguous,
           // absent, or contradictory registration rows are quarantined for review.

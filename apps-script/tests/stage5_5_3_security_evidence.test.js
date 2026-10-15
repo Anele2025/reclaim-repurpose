@@ -21,7 +21,7 @@ function fullyPopulatedLiveClaim() {
     environment: "GOOGLE_LIVE",
     executedAt: "2026-10-15T10:00:00+02:00",
     executionCommitSha: LIVE_SHA,
-    status: "VERIFIED",
+    status: "PASS",
     observedOutcome: "Observed outcome recorded for independent review.",
     evidenceRef: "docs/digital/security-evidence/reviewed/live-case-record.md",
     executionMethod: "Manual authenticated Apps Script execution under a restricted test deployment",
@@ -34,7 +34,7 @@ function fullyPopulatedLiveClaim() {
       reviewRecordRef: "docs/digital/security-evidence/reviewed/review-record.md"
     }
   }));
-  value.evidenceAssessmentStatus = "VERIFIED";
+  value.evidenceAssessmentStatus = "PASS";
   value.gateStatus = "BLOCKED";
   return value;
 }
@@ -86,24 +86,24 @@ test("missing provenance fields are rejected", () => {
 
 test("contradictory overall and per-case states are rejected", () => {
   const value = clone(fixture);
-  value.evidenceAssessmentStatus = "VERIFIED";
+  value.evidenceAssessmentStatus = "PASS";
   assert.throws(() => validateManifest(value), /evidenceAssessmentStatus contradiction/);
 });
 
 test("AppSheet authentication remains explicitly unverified in the baseline", () => {
   const value = clone(fixture);
   const item = value.cases.find(entry => entry.testCaseId === "APPSHEET-AUTH");
-  assert.equal(item.status, "NOT_STARTED");
-  assert.equal(item.environment, "NOT_STARTED");
+  assert.equal(item.status, "NOT_EXECUTED");
+  assert.equal(item.environment, "NOT_EXECUTED");
   assert.equal(item.evidenceRef, null);
   assert.equal(validateManifest(value).evidenceAssessmentStatus, "BLOCKED");
   assert.equal(validateManifest(value).gateStatus, "BLOCKED");
 });
 
-test("fully populated synthetic evidence cannot produce a live VERIFIED gate", () => {
+test("fully populated synthetic evidence cannot produce a live PASS gate", () => {
   const value = fullyPopulatedLiveClaim();
   value.cases.forEach(item => { item.environment = "SYNTHETIC"; });
-  assert.throws(() => validateManifest(value), /cannot be VERIFIED outside GOOGLE_LIVE/);
+  assert.throws(() => validateManifest(value), /cannot be PASS outside GOOGLE_LIVE/);
 });
 
 test("malformed JSON produces a clear CLI validation failure", () => {
@@ -121,7 +121,7 @@ test("a live-evidence record can be represented structurally without secrets", (
   const value = fullyPopulatedLiveClaim();
   const result = validateManifest(value);
   assert.equal(result.structurallyValid, true);
-  assert.equal(result.evidenceAssessmentStatus, "VERIFIED");
+  assert.equal(result.evidenceAssessmentStatus, "PASS");
   assert.equal(result.gateStatus, "BLOCKED");
   assert.equal(JSON.stringify(value).includes("access_token"), false);
   assert.equal(JSON.stringify(value).includes("spreadsheetId"), false);

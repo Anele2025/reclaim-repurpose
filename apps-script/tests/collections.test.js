@@ -276,7 +276,7 @@ test("collections require an active registered site and deactivation preserves h
   assert.equal(f.service.recordCollection(baseRequest({ siteId:"SITE_INACTIVE", operationId:"collect-op-0020" })).error.code, "SITE_NOT_AVAILABLE");
   f.state.sites.SITE_B = { ...f.state.sites.SITE_1, siteId:"SITE_B", organizationId:"ORG_B", country:"Eswatini" };
   assert.equal(f.service.recordCollection(baseRequest({ siteId:"SITE_B", operationId:"collect-op-0021" })).error.code, "SITE_NOT_AVAILABLE");
-  const created = f.service.recordCollection(baseRequest());
+  const created = f.service.recordCollection(baseRequest({ operationId:"collect-op-0023" }));
   const deactivated = f.service.deactivateCollectionSite({ organizationId:"ORG_A", siteId:"SITE_1", operationId:"site-deactivate-0001" });
   assert.equal(deactivated.ok, true); assert.equal(deactivated.value.status, "INACTIVE");
   assert.equal(f.service.getCollectionRecord({ organizationId:"ORG_A", collectionId:created.value.collectionId }).ok, true);

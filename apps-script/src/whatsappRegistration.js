@@ -78,7 +78,7 @@ var ReclaimWhatsAppRegistration = (function () {
         if (incoming.length > 120) return response(true, "CONTINUE", "That name is too long. Please send a name of at most 120 characters.");
         session.customerName = incoming;
         session.step = "LOCATION";
-        deps.sessionStore.put(organizationId, event.senderId, session);
+        persistSession(session);
         return response(true, "CONTINUE", "Thanks. Please share your location using WhatsApp's location attachment. A text address alone is not enough to register; you may also send a short address description.");
       }
       if (session.step === "LOCATION") {
@@ -91,7 +91,7 @@ var ReclaimWhatsAppRegistration = (function () {
             var description = text(incoming.replace(/^address\s*:/i, ""), 240);
             if (!description) return response(true, "CONTINUE", "Please add a short description after 'address:'. You must still share your WhatsApp location.");
             session.locationDescription = description;
-            deps.sessionStore.put(organizationId, event.senderId, session);
+            persistSession(session);
             return response(true, "CONTINUE", "Address description saved. Now share your WhatsApp location attachment so we can record valid coordinates.");
           }
           return response(true, "CONTINUE", "Please share a WhatsApp location attachment. A text address cannot replace latitude and longitude.");
@@ -101,7 +101,7 @@ var ReclaimWhatsAppRegistration = (function () {
         session.longitude = event.longitude;
         if (event.locationDescription) session.locationDescription = text(event.locationDescription, 240) || session.locationDescription || "";
         session.step = "CONFIRM";
-        deps.sessionStore.put(organizationId, event.senderId, session);
+        persistSession(session);
         return response(true, "CONTINUE", "Please confirm your registration: name " + session.customerName +
           "; WhatsApp number " + session.customerPhone + "; coordinates " + session.latitude + ", " + session.longitude +
           (session.locationDescription ? "; location " + session.locationDescription : "") +
@@ -111,7 +111,7 @@ var ReclaimWhatsAppRegistration = (function () {
         if (/^edit$/i.test(incoming)) {
           session = { step: "NAME", createdAt: nowMs, updatedAt: nowMs,
             expiresAt: nowMs + SESSION_TTL_MS, customerPhone: event.senderId };
-          deps.sessionStore.put(organizationId, event.senderId, session);
+          persistSession(session);
           return response(true, "CONTINUE", "No registration was submitted. Please send your full name again.");
         }
         if (!/^confirm$/i.test(incoming)) return response(true, "CONTINUE", "Reply CONFIRM to submit or EDIT to correct your details.");

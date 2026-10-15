@@ -101,6 +101,10 @@ var ReclaimWhatsAppRegistration = (function () {
         session.longitude = event.longitude;
         if (event.locationDescription) session.locationDescription = text(event.locationDescription, 240) || session.locationDescription || "";
         session.step = "CONFIRM";
+        // Allocate the registration and idempotency identifiers once, before
+        // any persistence attempt. Every retry of CONFIRM reuses these values.
+        session.registrationId = deps.idGenerator("registration");
+        session.operationId = deps.idGenerator("operation");
         persistSession(session);
         return response(true, "CONTINUE", "Please confirm your registration: name " + session.customerName +
           "; WhatsApp number " + session.customerPhone + "; coordinates " + session.latitude + ", " + session.longitude +
@@ -115,8 +119,16 @@ var ReclaimWhatsAppRegistration = (function () {
           return response(true, "CONTINUE", "No registration was submitted. Please send your full name again.");
         }
         if (!/^confirm$/i.test(incoming)) return response(true, "CONTINUE", "Reply CONFIRM to submit or EDIT to correct your details.");
-        var registrationId = deps.idGenerator("registration");
-        var operationId = deps.idGenerator("operation");
+        // Compatibility recovery for any older persisted CONFIRM session.
+        // Persist identifiers before calling registration storage so a retry
+        // cannot create a fresh idempotency key after an uncertain outcome.
+        if (!session.registrationId || !session.operationId) {
+          session.registrationId = deps.idGenerator("registration");
+          session.operationId = deps.idGenerator("operation");
+          persistSession(session);
+        }
+        var registrationId = session.registrationId;
+        var operationId = session.operationId;
         var saved;
         try {
           saved = deps.createRegistration({
@@ -198,8 +210,10 @@ var ReclaimWhatsAppRegistration = (function () {
         }
         if (result.ok === false) {
           try { deps.eventStore.release(event.eventId, digest, organizationId); } catch (_) {}
-          results.push(result);
-          continue;
+          // A retryable workflow failure must not be wrapped in an overall
+          // success response that a webhook adapter could acknowledge.
+          return failure(result.code || "PROCESSING_RETRYABLE",
+            "Message could not be safely processed; retry later.");
         }
         try {
           deps.eventStore.complete(event.eventId, digest, organizationId, result);

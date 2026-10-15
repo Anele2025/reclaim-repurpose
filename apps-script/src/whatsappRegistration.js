@@ -39,6 +39,7 @@ var ReclaimWhatsAppRegistration = (function () {
         deps.eventStore && typeof deps.eventStore.begin === "function" &&
         typeof deps.eventStore.complete === "function" &&
         typeof deps.eventStore.release === "function" &&
+        typeof deps.eventStore.linkRegistration === "function" &&
         deps.sessionStore && typeof deps.sessionStore.get === "function" &&
         typeof deps.sessionStore.put === "function" &&
         typeof deps.sessionStore.withSenderLock === "function" &&
@@ -50,7 +51,7 @@ var ReclaimWhatsAppRegistration = (function () {
       if (extra) Object.keys(extra).forEach(function (key) { result[key] = extra[key]; });
       return result;
     }
-    function nextMessage(event, session, organizationId, nowMs) {
+    function nextMessage(event, session, organizationId, nowMs, claimToken, eventDigest) {
       // Persist the event marker with each state transition. If the event store
       // completion fails after a session write, a retry can detect the transition.
       function persistSession(value) {
@@ -129,18 +130,27 @@ var ReclaimWhatsAppRegistration = (function () {
         }
         var registrationId = session.registrationId;
         var operationId = session.operationId;
+        var registrationRequest = {
+          organizationId: organizationId,
+          registrationId: registrationId,
+          customerName: session.customerName,
+          customerPhone: session.customerPhone,
+          locationDescription: session.locationDescription || "",
+          latitude: session.latitude,
+          longitude: session.longitude,
+          operationId: operationId
+        };
+        try {
+          var linked = deps.eventStore.linkRegistration(event.eventId, eventDigest, organizationId, claimToken, registrationRequest);
+          if (!linked || linked.ok !== true || linked.durable !== true) {
+            return response(false, "REGISTRATION_LINK_UNCERTAIN", "We could not safely confirm your registration attempt. Please try again later.");
+          }
+        } catch (_) {
+          return response(false, "REGISTRATION_LINK_UNCERTAIN", "We could not safely confirm your registration attempt. Please try again later.");
+        }
         var saved;
         try {
-          saved = deps.createRegistration({
-            organizationId: organizationId,
-            registrationId: registrationId,
-            customerName: session.customerName,
-            customerPhone: session.customerPhone,
-            locationDescription: session.locationDescription || "",
-            latitude: session.latitude,
-            longitude: session.longitude,
-            operationId: operationId
-          });
+          saved = deps.createRegistration(registrationRequest);
         } catch (_) {
           return response(false, "PERSISTENCE_UNAVAILABLE", "We could not complete registration right now. Please try again later.");
         }
@@ -191,7 +201,7 @@ var ReclaimWhatsAppRegistration = (function () {
         try { nowValue = deps.now(); } catch (_) { nowValue = null; }
         var nowMs = typeof nowValue === "number" ? nowValue : Date.parse(nowValue);
         if (!isFinite(nowMs)) {
-          try { deps.eventStore.release(event.eventId, digest, organizationId); } catch (_) {}
+          try { deps.eventStore.release(event.eventId, digest, organizationId, claim.claimToken, "CLOCK_UNAVAILABLE"); } catch (_) {}
           return failure("CLOCK_UNAVAILABLE", "Message could not be safely processed.");
         }
         var result;
@@ -201,22 +211,23 @@ var ReclaimWhatsAppRegistration = (function () {
             if (session && session.lastProcessedEventId === event.eventId) {
               return response(true, "RECOVERED_TRANSITION", "Your last message was processed. Please send your next response if needed.");
             }
-            return nextMessage(event, session, organizationId, nowMs);
+            return nextMessage(event, session, organizationId, nowMs, claim.claimToken, digest);
           });
           if (!result || typeof result.ok !== "boolean") throw new Error("INVALID_WORKFLOW_RESULT");
         } catch (_) {
-          try { deps.eventStore.release(event.eventId, digest, organizationId); } catch (_) {}
+          try { deps.eventStore.release(event.eventId, digest, organizationId, claim.claimToken, "SESSION_STORE_FAILURE"); } catch (_) {}
           return failure("SESSION_STORE_UNAVAILABLE", "Registration session is temporarily unavailable; retry later.");
         }
         if (result.ok === false) {
-          try { deps.eventStore.release(event.eventId, digest, organizationId); } catch (_) {}
+          try { deps.eventStore.release(event.eventId, digest, organizationId, claim.claimToken, "PROCESSING_RETRYABLE"); } catch (_) {}
           // A retryable workflow failure must not be wrapped in an overall
           // success response that a webhook adapter could acknowledge.
           return failure("PROCESSING_RETRYABLE",
             "Message could not be safely processed; retry later.");
         }
         try {
-          deps.eventStore.complete(event.eventId, digest, organizationId, result);
+          var completed = deps.eventStore.complete(event.eventId, digest, organizationId, claim.claimToken, result);
+          if (!completed || completed.ok !== true) throw new Error("EVENT_COMPLETION_UNCONFIRMED");
         } catch (_) {
           // Do not report success while completion is uncertain. The persisted
           // session marker makes a retry safe after a successful state transition.

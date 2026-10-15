@@ -91,7 +91,11 @@ function validEvidenceRef(value) {
   if (!nonEmpty(value) || value !== value.trim() || !EVIDENCE_PATH_RE.test(value)) return false;
   if (value.includes("//") || value.includes("\\") || /[%?#:\s]/.test(value)) return false;
   const parts = value.split("/");
-  if (parts.some(part => !part || part === "." || part === ".." || PLACEHOLDER_PATH_SEGMENT_RE.test(part))) return false;
+  if (parts.some(part => {
+    const stem = part.replace(/\.[^.]+$/, "");
+    return !part || part === "." || part === ".." ||
+      PLACEHOLDER_PATH_SEGMENT_RE.test(part) || PLACEHOLDER_PATH_SEGMENT_RE.test(stem);
+  })) return false;
   return parts[0] === "docs" && parts[1] === "digital" && parts[2] === "security-evidence";
 }
 function requireNullableEvidenceFields(item, prefix) {
@@ -142,7 +146,7 @@ function validateManifest(manifest) {
   if (!Array.isArray(manifest.gateLimitations) || manifest.gateLimitations.length === 0 ||
       !manifest.gateLimitations.every(nonEmpty)) fail("gateLimitations must be a non-empty array of strings");
   if (!Array.isArray(manifest.cases)) fail("cases must be an array");
-  if (manifest.gateStatus !== "BLOCKED") fail("gateStatus must remain BLOCKED: this validator cannot authorize the live-security gate");
+  if (manifest.gateStatus !== "BLOCKED") fail("gateStatus must remain BLOCKED: this structural validator cannot authorize the live-security gate");
   if (!STATES.has(manifest.evidenceAssessmentStatus)) fail("evidenceAssessmentStatus is unsupported");
   hasPlaceholder(manifest, "manifest");
 

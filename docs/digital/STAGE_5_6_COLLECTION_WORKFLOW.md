@@ -72,3 +72,20 @@ These service entrypoints are available for a future reviewed integration. No Ap
 5. Implement and verify the selected WhatsApp provider/webhook integration before claiming WhatsApp operation.
 
 Repository CI is not evidence that any of these live integrations work.
+
+
+## Stage 5.8 — company-scoped customer registration foundation
+
+The repository now defines a `CustomerRegistrations` sheet with these exact headers: `registrationId, organizationId, customerName, customerPhone, locationDescription, latitude, longitude, status, createdAt, updatedAt, createdBy, operationId`. The record includes the organization scope, contact details, a location description, numeric coordinates, status, timestamps, server-derived actor attribution, and the idempotency operation ID.
+
+The current service exposes `reclaimCreateCustomerRegistration`, `reclaimGetCustomerRegistration`, and `reclaimListCustomerRegistrations`. These functions use the existing trusted Apps Script identity adapter and require active `COMPANY_OWNER` membership for the specified organization. Client-supplied actor IDs and unknown fields are rejected. Reads and lists are organization-scoped and audited; writes use the existing idempotency and audit workflow. Cross-organization reads return the same `CUSTOMER_REGISTRATION_NOT_FOUND` result as an unknown registration.
+
+Coordinates are mandatory at registration in this increment because the agreed routing feature depends on customer coordinates. Latitude must be a finite number from -90 through 90 and longitude from -180 through 180. Missing, string-valued, non-finite, or out-of-range coordinates are rejected. A future change may define a controlled location-correction flow, but this stage does not silently create a registration that cannot support routing.
+
+Customer names, contact values, and location descriptions are bounded and validated. Use only synthetic customer data in tests. Do not share the master spreadsheet directly with company owners; their access must continue through a reviewed authenticated interface.
+
+### WhatsApp integration is not live
+
+These are restricted Apps Script function-level entrypoints, not an incoming WhatsApp webhook. No `doPost` endpoint, provider signature verification, WhatsApp Business credentials, or live messaging was added. Customer-originated registration must not be wired directly to these owner-authenticated functions or accept an untrusted organization ID. A subsequent WhatsApp integration stage must verify the provider's webhook and derive the company context from a trusted company-specific registration route before calling a narrowly scoped registration operation. Until that is implemented and live-tested, WhatsApp registration remains **NOT IMPLEMENTED / NOT LIVE-VERIFIED**.
+
+No live spreadsheet was created or modified, no Apps Script was deployed, and no AppSheet interface was configured by Stage 5.8. CI verifies repository behavior only.

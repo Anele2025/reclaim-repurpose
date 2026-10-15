@@ -440,6 +440,67 @@ var ReclaimService = (function () {
       return { ok: true, value: result.value, replayed: result.replayed === true, correlationId: correlationId };
     }
 
+    var REGISTRATION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/;
+    function customerRegistrationInput(request) {
+      if (!request || typeof request !== "object" || Array.isArray(request)) return { ok: false, error: { code: "INVALID_REQUEST", message: "Request fields are invalid." } };
+      var allowed = ["organizationId","registrationId","customerName","customerPhone","locationDescription","latitude","longitude","operationId"];
+      if (Object.keys(request).some(function (key) { return allowed.indexOf(key) < 0; })) return { ok: false, error: { code: "INVALID_REQUEST", message: "Request fields are invalid." } };
+      if (typeof request.organizationId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/.test(request.organizationId) || typeof request.registrationId !== "string" || !REGISTRATION_ID_PATTERN.test(request.registrationId)) return { ok: false, error: { code: "INVALID_CUSTOMER_REGISTRATION_SCOPE", message: "Organization and registration identifiers are required." } };
+      if (typeof request.operationId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/.test(request.operationId)) return { ok: false, error: { code: "INVALID_OPERATION_ID", message: "A valid operation ID is required." } };
+      if (typeof request.customerName !== "string" || !request.customerName.trim() || request.customerName.trim().length > 120 || /[\u0000-\u001F]/.test(request.customerName)) return { ok: false, error: { code: "INVALID_CUSTOMER_NAME", message: "Customer name must contain 1–120 safe characters." } };
+      if (typeof request.customerPhone !== "string" || !request.customerPhone.trim() || request.customerPhone.trim().length > 32 || /[\u0000-\u001F]/.test(request.customerPhone)) return { ok: false, error: { code: "INVALID_CUSTOMER_PHONE", message: "Customer contact number is invalid." } };
+      var digits = request.customerPhone.replace(/\D/g, "");
+      if (digits.length < 7 || digits.length > 15) return { ok: false, error: { code: "INVALID_CUSTOMER_PHONE", message: "Customer contact number is invalid." } };
+      if (typeof request.latitude !== "number" || !isFinite(request.latitude) || request.latitude < -90 || request.latitude > 90 || typeof request.longitude !== "number" || !isFinite(request.longitude) || request.longitude < -180 || request.longitude > 180) return { ok: false, error: { code: "INVALID_CUSTOMER_COORDINATES", message: "Valid latitude and longitude are required for routing." } };
+      var location = optionalText(request.locationDescription, "locationDescription", 240);
+      if (!location.ok) return { ok: false, error: { code: "INVALID_CUSTOMER_LOCATION", message: "Customer location description is invalid." } };
+      return { ok: true, value: { organizationId: request.organizationId, registrationId: request.registrationId, customerName: request.customerName.trim(), customerPhone: request.customerPhone.trim(), locationDescription: location.value, latitude: request.latitude, longitude: request.longitude, operationId: request.operationId } };
+    }
+    function createCustomerRegistration(request) {
+      var correlationId = id(), input = customerRegistrationInput(request);
+      if (!input.ok) return denied(input, "CREATE_CUSTOMER_REGISTRATION", correlationId, request && request.organizationId);
+      var value = input.value, context = contextFor(value.organizationId, "COMPANY_OWNER", false);
+      if (!context.ok) return denied(context, "CREATE_CUSTOMER_REGISTRATION", correlationId, value.organizationId);
+      if (typeof deps.digest !== "function") return safe("DIGEST_UNAVAILABLE", "Operation could not be safely prepared.", correlationId);
+      var digest; try { digest = deps.digest(JSON.stringify(value)); } catch (_) { return safe("DIGEST_UNAVAILABLE", "Operation could not be safely prepared.", correlationId); }
+      if (typeof digest !== "string" || !digest) return safe("DIGEST_UNAVAILABLE", "Operation could not be safely prepared.", correlationId);
+      var result = deps.idempotency.execute(deps.repository, deps.lockService, { operationId: value.operationId, actorId: context.actorId, organizationId: value.organizationId, operationType: "CREATE_CUSTOMER_REGISTRATION", payloadDigest: digest, correlationId: correlationId }, now(), function () {
+        var refreshed = contextFor(value.organizationId, "COMPANY_OWNER", false);
+        if (!refreshed.ok) throw new Error("AUTHORIZATION_CHANGED");
+        var existing; try { existing = deps.repository.findCustomerRegistration(value.registrationId); } catch (_) { throw new Error("STORAGE_UNAVAILABLE"); }
+        if (existing) return { ok: false, error: { code: "REGISTRATION_ID_UNAVAILABLE", message: "Registration ID is already registered or unavailable." } };
+        if (!audit(refreshed, "CREATE_CUSTOMER_REGISTRATION", "ATTEMPTED", "", value.operationId, value.registrationId).ok) throw new Error("AUDIT_REQUIRED");
+        var timestamp = now();
+        var registration = { registrationId: value.registrationId, organizationId: refreshed.organization.organizationId, customerName: value.customerName, customerPhone: value.customerPhone, locationDescription: value.locationDescription, latitude: value.latitude, longitude: value.longitude, status: "REGISTERED", createdAt: timestamp, updatedAt: timestamp, createdBy: refreshed.actorId, operationId: value.operationId };
+        try { deps.repository.appendCustomerRegistration(registration); } catch (_) { throw new Error("WRITE_OUTCOME_UNCERTAIN"); }
+        if (!audit(refreshed, "CREATE_CUSTOMER_REGISTRATION", "SUCCEEDED", "", value.operationId, value.registrationId).ok) throw new Error("POST_WRITE_AUDIT_UNAVAILABLE");
+        return { ok: true, recordRef: value.registrationId, value: registration };
+      });
+      if (!result.ok) { var err = result.error || {}; if (!audit(context, "CREATE_CUSTOMER_REGISTRATION", "FAILED", err.code || "REQUEST_FAILED", value.operationId, value.registrationId).ok && err.code !== "RECONCILIATION_REQUIRED") return safe("AUDIT_UNAVAILABLE", "Request could not be safely completed.", correlationId); return safe(err.code || "REQUEST_FAILED", err.message || "Request could not be completed.", correlationId); }
+      if (result.replayed && !audit(context, "CREATE_CUSTOMER_REGISTRATION_REPLAY", "REPLAYED", "", value.operationId, value.registrationId).ok) return safe("AUDIT_UNAVAILABLE", "Request could not be safely completed.", correlationId);
+      return { ok: true, value: result.value, replayed: result.replayed === true, correlationId: correlationId };
+    }
+    function getCustomerRegistration(request) {
+      var correlationId = id(), target = request && request.organizationId, registrationId = request && request.registrationId;
+      if (!request || typeof request !== "object" || Array.isArray(request) || Object.keys(request).some(function (key) { return ["organizationId","registrationId"].indexOf(key) < 0; }) || typeof registrationId !== "string" || !REGISTRATION_ID_PATTERN.test(registrationId)) return denied({ error: { code: "INVALID_REQUEST", message: "Request fields are invalid." } }, "READ_CUSTOMER_REGISTRATION", correlationId, target);
+      var context = contextFor(target, "COMPANY_OWNER", false);
+      if (!context.ok) return denied(context, "READ_CUSTOMER_REGISTRATION", correlationId, target);
+      var record; try { record = deps.repository.findCustomerRegistration(registrationId); } catch (_) { return safe("STORAGE_UNAVAILABLE", "The request could not be completed.", correlationId); }
+      if (!record || String(record.organizationId) !== String(context.organization.organizationId)) return safe("CUSTOMER_REGISTRATION_NOT_FOUND", "Customer registration could not be found.", correlationId);
+      if (!audit(context, "READ_CUSTOMER_REGISTRATION", "SUCCEEDED", "", "", registrationId).ok) return safe("AUDIT_UNAVAILABLE", "Request could not be safely completed.", correlationId);
+      return { ok: true, value: record, correlationId: correlationId };
+    }
+    function listCustomerRegistrations(request) {
+      var correlationId = id(), target = request && request.organizationId, limit = request && request.limit !== undefined ? request.limit : 100;
+      if (!request || typeof request !== "object" || Array.isArray(request) || Object.keys(request).some(function (key) { return ["organizationId","limit"].indexOf(key) < 0; }) || typeof limit !== "number" || !isFinite(limit) || Math.floor(limit) !== limit || limit < 1 || limit > 200) return denied({ error: { code: "INVALID_REQUEST", message: "Request fields are invalid." } }, "LIST_CUSTOMER_REGISTRATIONS", correlationId, target);
+      var context = contextFor(target, "COMPANY_OWNER", false);
+      if (!context.ok) return denied(context, "LIST_CUSTOMER_REGISTRATIONS", correlationId, target);
+      var records; try { records = deps.repository.findCustomerRegistrationsForOrganization(context.organization.organizationId, limit); } catch (_) { return safe("STORAGE_UNAVAILABLE", "The request could not be completed.", correlationId); }
+      if (!Array.isArray(records) || records.some(function (record) { return String(record.organizationId) !== String(context.organization.organizationId); })) return safe("STORAGE_INTEGRITY_ERROR", "Customer registrations could not be safely returned.", correlationId);
+      if (!audit(context, "LIST_CUSTOMER_REGISTRATIONS", "SUCCEEDED", "", "", "").ok) return safe("AUDIT_UNAVAILABLE", "Request could not be safely completed.", correlationId);
+      return { ok: true, value: records, correlationId: correlationId };
+    }
+
     return Object.freeze({
       getOrganizationSummary: getOrganizationSummary,
       setOrganizationServiceEnabled: setOrganizationServiceEnabled,
@@ -451,7 +512,10 @@ var ReclaimService = (function () {
       recordCollection: recordCollection,
       getCollectionRecord: getCollectionRecord,
       listCollectionRecords: listCollectionRecords,
-      recordCollectionHandover: recordCollectionHandover
+      recordCollectionHandover: recordCollectionHandover,
+      createCustomerRegistration: createCustomerRegistration,
+      getCustomerRegistration: getCustomerRegistration,
+      listCustomerRegistrations: listCustomerRegistrations
     });
   }
   return Object.freeze({ create: create });

@@ -188,10 +188,55 @@ test("idempotency fails closed on lock failure and retains unresolved PROCESSING
 });
 
 test("repository text escaping handles formula markers and leading whitespace", () => {
-  assert.equal(repoModule.safeText("=IMPORTXML(\\"x\\")"), "'=IMPORTXML(\\"x\\")");
+  assert.equal(repoModule.safeText('=IMPORTXML("x")'), "'=IMPORTXML(\"x\")");
   assert.equal(repoModule.safeText("  +cmd"), "'  +cmd");
   assert.equal(repoModule.safeText("-1 as text"), "'-1 as text");
   assert.equal(repoModule.safeText("@SUM(A1)"), "'@SUM(A1)");
   assert.equal(repoModule.safeText("ordinary text"), "ordinary text");
   assert.equal(repoModule.safeText(12), 12);
+});
+
+
+function fakeSheet(headers, dataRows = []) {
+  const grid = [headers.slice(), ...dataRows.map(row => row.slice())];
+  return {
+    getLastColumn: () => headers.length,
+    getLastRow: () => grid.length,
+    getRange: (row, col, numRows, numCols) => ({
+      getDisplayValues: () => grid.slice(row - 1, row - 1 + numRows).map(r => r.slice(col - 1, col - 1 + numCols).map(v => String(v))),
+      getValues: () => grid.slice(row - 1, row - 1 + numRows).map(r => r.slice(col - 1, col - 1 + numCols)),
+      setValues: values => { values.forEach((r, i) => { grid[row - 1 + i] = r.slice(); }); }
+    }),
+    appendRow: row => { grid.push(row.slice()); },
+    _grid: grid
+  };
+}
+function fakeSpreadsheet(sheets) {
+  return { openById: () => ({ getSheetByName: name => sheets[name] || null }) };
+}
+
+test("Sheets repository rejects missing and incompatible schemas and ambiguous stable IDs", () => {
+  const orgHeaders = Array.from(repoModule.schemas.Organizations);
+  const validRow = ["ORG_A", "Synthetic A", "Botswana", "BWP", "ACTIVE", true, 1, "created", "updated"];
+  const missing = repoModule.create(fakeSpreadsheet({}), { getProperty: () => "synthetic-sheet" });
+  assert.throws(() => missing.findOrganization("ORG_A"), /REQUIRED_SHEET_MISSING/);
+  const wrong = repoModule.create(fakeSpreadsheet({ Organizations: fakeSheet(["organizationId", "wrong"]) }), { getProperty: () => "synthetic-sheet" });
+  assert.throws(() => wrong.findOrganization("ORG_A"), /SCHEMA_MISMATCH/);
+  const duplicateSheet = fakeSheet(orgHeaders, [validRow, validRow]);
+  const duplicate = repoModule.create(fakeSpreadsheet({ Organizations: duplicateSheet }), { getProperty: () => "synthetic-sheet" });
+  assert.throws(() => duplicate.findOrganization("ORG_A"), /AMBIGUOUS_RECORD/);
+});
+
+test("Sheets repository preserves typed values and escapes untrusted text on writes", () => {
+  const sheets = {};
+  Object.keys(repoModule.schemas).forEach(name => { sheets[name] = fakeSheet(Array.from(repoModule.schemas[name])); });
+  const repository = repoModule.create(fakeSpreadsheet(sheets), { getProperty: () => "synthetic-sheet" });
+  repository.appendOrganization({
+    organizationId: "ORG_Z", organizationName: "  =formula", country: "Botswana", currency: "BWP",
+    status: "PROSPECT", serviceEnabled: false, configVersion: 1, createdAt: "now", updatedAt: "now"
+  });
+  const stored = repository.findOrganization("ORG_Z");
+  assert.equal(stored.organizationName, "'  =formula");
+  assert.equal(stored.serviceEnabled, false);
+  assert.equal(stored.configVersion, 1);
 });

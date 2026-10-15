@@ -1,0 +1,48 @@
+name: Stage 5.5.3 Security Evidence Validation
+
+on:
+  pull_request:
+    branches:
+      - stage-5-5-2-live-google-security-verification
+      - stage-5-5-3-security-evidence-gate
+  push:
+    branches:
+      - stage-5-5-3-security-evidence-gate
+
+permissions:
+  contents: read
+
+jobs:
+  pure-validation:
+    name: Repository validation (not live Google verification)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Run Stage 5.5.3 evidence-validator tests
+        run: node --test apps-script/tests/stage5_5_3_security_evidence.test.js
+      - name: Validate evidence manifest structure
+        run: node scripts/validate_security_evidence.js
+      - name: Run all Apps Script-compatible tests
+        run: node --test apps-script/tests/*.test.js
+      - name: Run Apps Script package tests
+        run: python -m unittest scripts.test_package_apps_script
+      - name: Build deterministic Apps Script package
+        run: python scripts/package_apps_script.py
+      - name: Syntax-check generated Apps Script
+        run: node --check < dist/apps-script/Code.gs
+      - name: Validate Stage 4 operational structure
+        run: python scripts/validate_stage4.py
+      - name: State live gate limitation explicitly
+        run: |
+          echo "Repository validation may pass while live Google security remains BLOCKED."
+          echo "No Google project, spreadsheet, deployment, or live identity was accessed by this workflow."
+          echo "A green CI run is not live Google security approval."

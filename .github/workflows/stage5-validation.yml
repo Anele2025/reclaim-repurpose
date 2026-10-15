@@ -16,6 +16,7 @@ on:
       - stage-5-2-authenticated-sheets-backend
       - stage-5-3-secure-recoverable-service
       - stage-5-4-google-integration-packaging
+      - stage-5-10-whatsapp-durable-boundary
 
 jobs:
   pure-validation:

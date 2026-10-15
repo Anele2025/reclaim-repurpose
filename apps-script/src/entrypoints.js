@@ -8,6 +8,18 @@ function reclaimGetMyOrganizationSummary(organizationId) {
 function reclaimSetOrganizationServiceEnabled(request) {
   return reclaimCreateService().setOrganizationServiceEnabled(request);
 }
+function reclaimRecordCollection(request) {
+  return reclaimCreateService().recordCollection(request);
+}
+function reclaimGetCollectionRecord(request) {
+  return reclaimCreateService().getCollectionRecord(request);
+}
+function reclaimListCollectionRecords(request) {
+  return reclaimCreateService().listCollectionRecords(request);
+}
+function reclaimRecordCollectionHandover(request) {
+  return reclaimCreateService().recordCollectionHandover(request);
+}
 function reclaimCreateService() {
   var props = PropertiesService.getScriptProperties();
   var repository = ReclaimSheetsRepository.create(SpreadsheetApp, props);

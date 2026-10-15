@@ -89,14 +89,15 @@ test("event lifecycle distinguishes new, in-progress, completed replay, and conf
   assert.equal(events.begin("e1", "d1", "ORG_B").status, "NEW");
 });
 
-test("released events may be retried and claim expiry is not treated as completion", () => {
+test("released events may be retried but expired processing claims are quarantined", () => {
   const f = fixture();
   const events = f.api.eventStore("ACCOUNT_A");
   events.begin("e1", "d1", "ORG_A");
   events.release("e1", "d1", "ORG_A", "TEMPORARY_FAILURE");
   assert.equal(events.begin("e1", "d1", "ORG_A").status, "NEW");
   f.advance(101);
-  assert.equal(events.begin("e1", "d1", "ORG_A").status, "NEW");
+  assert.equal(events.begin("e1", "d1", "ORG_A").status, "UNAVAILABLE");
+  assert.equal(events.begin("e1", "d1", "ORG_A").code, "RECONCILIATION_REQUIRED");
 });
 
 test("invalid event transitions and mismatched event digests are rejected", () => {

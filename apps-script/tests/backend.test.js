@@ -240,4 +240,12 @@ test("Sheets repository preserves typed values and escapes untrusted text on wri
   assert.equal(stored.organizationName, "'  =formula");
   assert.equal(stored.serviceEnabled, false);
   assert.equal(stored.configVersion, 1);
+  assert.throws(() => repository.appendOrganization({
+    organizationId: "ORG_Z", organizationName: "Duplicate", country: "Botswana", currency: "BWP",
+    status: "PROSPECT", serviceEnabled: false, configVersion: 1, createdAt: "now", updatedAt: "now"
+  }), /DUPLICATE_STABLE_ID/);
+  assert.throws(() => repository.appendOrganization({
+    organizationId: "ORG_Y", organizationName: "Wrong currency", country: "Botswana", currency: "SZL",
+    status: "PROSPECT", serviceEnabled: false, configVersion: 1, createdAt: "now", updatedAt: "now"
+  }), /COUNTRY_CURRENCY_MISMATCH/);
 });

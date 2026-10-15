@@ -80,6 +80,7 @@ test("central policy rejects inactive memberships and cross-organization record 
   const owner = { actorId: "owner@example.invalid", organizationId: "ORG_A", role: "COMPANY_OWNER", status: "ACTIVE" };
   assert.equal(auth.authorize("owner@example.invalid", null, org, "ORG_A", []).ok, false);
   assert.equal(auth.authorize("owner@example.invalid", { ...owner, status: "REVOKED" }, org, "ORG_A", []).error.code, "MEMBERSHIP_INACTIVE");
+  assert.equal(auth.authorize("owner@example.invalid", { ...owner, role: "UNKNOWN" }, org, "ORG_A", []).error.code, "ROLE_DENIED");
   assert.equal(auth.authorizeRecordScope({ ok: true, role: "COMPANY_OWNER", organizationId: "ORG_A" }, { organizationId: "ORG_B" }).ok, false);
 });
 
@@ -113,6 +114,11 @@ test("identity absence, ambiguous membership, revoked membership and invalid cou
   ]);
   invalid.state.organizations.ORG_A.currency = "SZL";
   assert.equal(invalid.service.getOrganizationSummary({ organizationId: "ORG_A" }).error.code, "CONFIGURATION_INVALID");
+  const suspended = fixtures("owner@example.invalid", [
+    { actorId: "owner@example.invalid", organizationId: "ORG_A", role: "COMPANY_OWNER", status: "ACTIVE" }
+  ]);
+  suspended.state.organizations.ORG_A.status = "SUSPENDED";
+  assert.equal(suspended.service.getOrganizationSummary({ organizationId: "ORG_A" }).error.code, "ORGANIZATION_INACTIVE");
 });
 
 test("platform administrator is resolved only through an active trusted global membership", () => {
@@ -248,4 +254,35 @@ test("Sheets repository preserves typed values and escapes untrusted text on wri
     organizationId: "ORG_Y", organizationName: "Wrong currency", country: "Botswana", currency: "SZL",
     status: "PROSPECT", serviceEnabled: false, configVersion: 1, createdAt: "now", updatedAt: "now"
   }), /COUNTRY_CURRENCY_MISMATCH/);
+});
+
+
+test("a contending operation cannot enter while the first mutation holds the script lock", () => {
+  const operations = Object.create(null);
+  let held = false;
+  let mutationCount = 0;
+  const repository = {
+    findOperation: id => operations[id] || null,
+    appendIdempotency: row => { operations[row.operationId] = { ...row }; },
+    updateOperation: (id, changes) => { if (!operations[id]) return null; Object.assign(operations[id], changes); return { ok: true }; }
+  };
+  const lockService = { getScriptLock: () => ({
+    tryLock: () => { if (held) return false; held = true; return true; },
+    releaseLock: () => { held = false; }
+  }) };
+  const input = { operationId: "operation-concurrent-01", actorId: "admin", organizationId: "ORG_A",
+    operationType: "SYNTHETIC_TEST", payloadDigest: "server-digest", correlationId: "correlation-01" };
+  const outer = idem.execute(repository, lockService, input, "now", () => {
+    const inner = idem.execute(repository, lockService, input, "now", () => {
+      mutationCount += 100;
+      return { ok: true, value: { duplicate: true } };
+    });
+    assert.equal(inner.error.code, "LOCK_UNAVAILABLE");
+    mutationCount += 1;
+    return { ok: true, value: { applied: true } };
+  });
+  assert.equal(outer.ok, true);
+  assert.equal(mutationCount, 1);
+  assert.equal(operations[input.operationId].status, "SUCCEEDED");
+  assert.equal(held, false);
 });

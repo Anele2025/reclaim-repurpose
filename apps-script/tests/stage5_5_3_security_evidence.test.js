@@ -34,13 +34,15 @@ function fullyPopulatedLiveClaim() {
       reviewRecordRef: "docs/digital/security-evidence/reviewed/review-record.md"
     }
   }));
-  value.gateStatus = "VERIFIED";
+  value.evidenceAssessmentStatus = "VERIFIED";
+  value.gateStatus = "BLOCKED";
   return value;
 }
 
 test("valid synthetic inventory is structurally valid but live gate remains BLOCKED", () => {
   const result = validateManifest(fixture);
   assert.equal(result.structurallyValid, true);
+  assert.equal(result.evidenceAssessmentStatus, "BLOCKED");
   assert.equal(result.gateStatus, "BLOCKED");
   assert.equal(result.verifiedCaseCount, 0);
   assert.equal(result.requiredCaseCount, 13);
@@ -84,8 +86,8 @@ test("missing provenance fields are rejected", () => {
 
 test("contradictory overall and per-case states are rejected", () => {
   const value = clone(fixture);
-  value.gateStatus = "VERIFIED";
-  assert.throws(() => validateManifest(value), /gateStatus contradiction/);
+  value.evidenceAssessmentStatus = "VERIFIED";
+  assert.throws(() => validateManifest(value), /evidenceAssessmentStatus contradiction/);
 });
 
 test("AppSheet authentication remains explicitly unverified in the baseline", () => {
@@ -94,6 +96,7 @@ test("AppSheet authentication remains explicitly unverified in the baseline", ()
   assert.equal(item.status, "NOT_STARTED");
   assert.equal(item.environment, "NOT_STARTED");
   assert.equal(item.evidenceRef, null);
+  assert.equal(validateManifest(value).evidenceAssessmentStatus, "BLOCKED");
   assert.equal(validateManifest(value).gateStatus, "BLOCKED");
 });
 
@@ -118,8 +121,20 @@ test("a live-evidence record can be represented structurally without secrets", (
   const value = fullyPopulatedLiveClaim();
   const result = validateManifest(value);
   assert.equal(result.structurallyValid, true);
-  assert.equal(result.gateStatus, "VERIFIED");
+  assert.equal(result.evidenceAssessmentStatus, "VERIFIED");
+  assert.equal(result.gateStatus, "BLOCKED");
   assert.equal(JSON.stringify(value).includes("access_token"), false);
   assert.equal(JSON.stringify(value).includes("spreadsheetId"), false);
   // Structural acceptance is not proof that the external execution or review actually happened.
+});
+
+test("enforced live gate cannot be passed by editing a manifest, even with complete claims", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "reclaim-evidence-"));
+  const candidate = path.join(dir, "candidate.json");
+  fs.writeFileSync(candidate, JSON.stringify(fullyPopulatedLiveClaim()), "utf8");
+  const result = spawnSync(process.execPath, [
+    path.join(__dirname, "../../scripts/validate_security_evidence.js"), candidate, "--enforce-live-gate"
+  ], { encoding: "utf8" });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /external authorized reviewer must independently inspect/);
 });

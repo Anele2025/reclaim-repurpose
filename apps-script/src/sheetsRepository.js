@@ -100,7 +100,11 @@ var ReclaimSheetsRepository = (function () {
       appendOrganization: function (record) { return append("Organizations", record); },
       appendMembership: function (record) { return append("Memberships", record); },
       updateOrganizationServiceEnabled: function (id, enabled, updatedAt) {
-        return updateById("Organizations", id, { serviceEnabled: enabled, updatedAt: updatedAt, configVersion: "updated-" + updatedAt });
+        var current = findUnique("Organizations", "organizationId", id);
+        if (!current) return null;
+        var version = Number(current.configVersion);
+        if (!isFinite(version) || version < 0) throw new Error("CONFIG_VERSION_INVALID");
+        return updateById("Organizations", id, { serviceEnabled: enabled, updatedAt: updatedAt, configVersion: version + 1 });
       },
       updateMembershipStatus: function (id, status, updatedAt, revokedAt) {
         return updateById("Memberships", id, { status: status, updatedAt: updatedAt, revokedAt: revokedAt || "" });

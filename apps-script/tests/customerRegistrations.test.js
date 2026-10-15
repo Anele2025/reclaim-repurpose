@@ -64,7 +64,7 @@ function fixtures(actorId = "owner-a@example.invalid", memberships, options = {}
 
 test("authorized company owner creates a registration with server-assigned scope and audit", () => {
   const f = fixtures();
-  const result = f.service.createCustomerRegistration(validRequest({ organizationId: "ORG_A", actorId: undefined }));
+  const result = f.service.createCustomerRegistration(validRequest());
   assert.equal(result.ok, true);
   assert.equal(result.value.organizationId, "ORG_A");
   assert.equal(result.value.createdBy, "owner-a@example.invalid");

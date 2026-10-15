@@ -10,8 +10,9 @@ This stage adds a structured test inventory and validator. It does not access Go
 
 - `docs/digital/security-evidence/stage5_5_3_evidence.json` — synthetic baseline inventory for all required verification cases.
 - `scripts/validate_security_evidence.js` — dependency-free Node.js structural validator.
-- `apps-script/tests/stage5_5_3_security_evidence.test.js` — adversarial tests for malformed, missing, contradictory, synthetic, and claimed live evidence.
-- `.github/workflows/stage5-5-3-security-evidence.yml` — dedicated repository-validation workflow.
+- `apps-script/tests/stage5_5_3_security_evidence.test.js` — baseline validator regression tests.
+- `apps-script/tests/stage5_5_4_evidence_gate_hardening.test.js` — adversarial schema, state, timestamp, and reference-path tests.
+- `.github/workflows/stage5-5-3-security-evidence.yml` — repository-validation workflow.
 
 ## Run the checks
 
@@ -19,6 +20,7 @@ From the repository root:
 
 ```sh
 node --test apps-script/tests/stage5_5_3_security_evidence.test.js
+node --test apps-script/tests/stage5_5_4_evidence_gate_hardening.test.js
 node scripts/validate_security_evidence.js
 node --test apps-script/tests/*.test.js
 python -m unittest scripts.test_package_apps_script
@@ -27,11 +29,17 @@ node --check < dist/apps-script/Code.gs
 python scripts/validate_stage4.py
 ```
 
-The manifest validator exits non-zero for malformed JSON, missing or unknown cases, duplicate IDs, unsupported states, missing provenance, placeholder evidence, mock-only evidence represented as live, invalid evidence paths, and contradictory evidence-assessment states.
+## Stage 5.5.4 hardening findings
 
-A structurally valid inventory with all required cases still `NOT_STARTED` is expected to pass repository validation while reporting the live gate as `BLOCKED`. This keeps ordinary development usable without falsely passing the live gate.
+The Stage 5.5.3 code inspection identified gaps in the validator's structural contract:
 
-The optional `--enforce-live-gate` flag intentionally exits non-zero even when the manifest claims all cases are verified. This validator has no trusted external attestation mechanism and therefore cannot grant release authorization.
+- Unrecognized fields were ignored, so misspelled or misleading extra claims could coexist with a passing structural result.
+- `BLOCKED` records did not reject a retained `executionCommitSha`, allowing stale provenance to remain on a case that claimed no execution evidence.
+- The timestamp check relied on permissive date parsing and did not reject all impossible calendar dates.
+- Evidence references were not constrained to the documented repository evidence directory or a strict, safe path character set.
+- `FAILED` records required an observed outcome but did not require a complete execution record and artifact reference.
+
+The hardening adds exact key sets for the manifest, cases, and review records; consistent required fields and state transitions; stricter timestamp parsing; repository-relative evidence path rules; failed-case provenance requirements; and regression tests for these cases. These are structural consistency fixes—not external evidence authentication.
 
 ## States and interpretation
 
@@ -40,16 +48,16 @@ Each test case uses one of:
 - `NOT_STARTED` — no qualifying execution has been recorded.
 - `IN_PROGRESS` — an identified test environment has been selected and the test is underway.
 - `BLOCKED` — a prerequisite or safe execution path is unavailable.
-- `FAILED` — the observed outcome failed the required security property.
+- `FAILED` — an execution produced a failing outcome and must retain its execution record.
 - `VERIFIED` — the record claims a qualifying live test passed and includes required provenance and independent-review fields.
 
-Environment values are `NOT_STARTED`, `SYNTHETIC`, and `GOOGLE_LIVE`. A `VERIFIED` case must identify the live environment, timezone-aware execution time, full source commit SHA, expected and observed outcomes, sanitized relative evidence reference, authorized project-owner verifier, and an independent-review record. Synthetic/mock methods cannot qualify.
+Environment values are `NOT_STARTED`, `SYNTHETIC`, and `GOOGLE_LIVE`. A `VERIFIED` case must identify the live environment, a valid timezone-aware timestamp, full source commit SHA, expected and observed outcomes, sanitized relative evidence reference, authorized project-owner verifier, and an independent-review record. Synthetic/mock methods cannot qualify.
 
-The manifest separately records `evidenceAssessmentStatus` and the effective `gateStatus`. The effective gate is deliberately constrained to `BLOCKED` by this validator. A manifest field, screenshot, CI result, or reviewer name alone is not an authenticated release attestation.
+The manifest separately records `evidenceAssessmentStatus` and the effective `gateStatus`. The effective gate is deliberately constrained to `BLOCKED` by this validator. Unknown fields are rejected. The `--enforce-live-gate` flag intentionally exits non-zero even when the manifest claims every case is verified. No command-line flag, workflow variable, or manifest field grants release authorization.
 
 ## Required coverage
 
-The manifest enumerates these 13 cases:
+The manifest enumerates 13 cases:
 
 1. Actual Apps Script execution identity.
 2. Missing or unavailable caller identity.
@@ -65,35 +73,20 @@ The manifest enumerates these 13 cases:
 12. Formula-injection safety.
 13. AppSheet-to-service authentication, once an actual integration path has been designed.
 
-The baseline marks all 13 `NOT_STARTED`. AppSheet authentication remains unselected and unverified.
+The committed baseline marks all 13 `NOT_STARTED`. AppSheet authentication remains unselected and unverified.
 
-## Evidence intake and review procedure
+## What automation can and cannot prove
 
-1. An authorized Google project owner performs each test in a dedicated synthetic Apps Script project and disposable workbook.
-2. Record the actual source SHA, timestamp with timezone, restricted deployment mode, synthetic identity label, expected/observed result, sanitized evidence reference, execution method, and limitations.
-3. Keep emails, spreadsheet/project/deployment IDs, credentials, OAuth tokens, secret URLs, raw private logs, and participant information out of committed evidence. If an artifact cannot be sanitized without destroying its value, keep it in an appropriately access-controlled location and reference it using an approved non-sensitive identifier.
-4. Do not change a case to `VERIFIED` until the underlying evidence has been reviewed. The independent reviewer must inspect the original test artifacts and the execution context, not merely the JSON fields or screenshots.
-5. Record failed or inconclusive results as `FAILED`, `BLOCKED`, or `IN_PROGRESS` as appropriate. Do not delete failed results to make the inventory pass.
-6. Have a reviewer who did not execute the test independently inspect the evidence, including actual Drive sharing/inherited permissions for direct-access cases.
-7. Obtain an explicit release decision through the project's separately authorized review process. The current validator does not authenticate reviewers, Google logs, or external artifacts and intentionally cannot grant that decision.
-8. Retain the private test-resource inventory and cleanup decision. Do not share the master workbook with company owners. Do not create, share, deploy, or delete Google resources without the project owner's explicit authorization.
+The validator checks schema shape, required coverage, known statuses/environments, status/evidence consistency, basic provenance formats, path safety, review-field consistency, and aggregate status. Tests demonstrate that manually editing manifest fields cannot authorize the live gate.
 
-## What automation cannot prove
+It cannot establish that a Google execution actually happened, that an artifact came from the claimed project or deployment, that a timestamp or verifier identity is authentic, that Drive permissions were inspected accurately, or that an independent reviewer genuinely inspected the underlying evidence. A syntactically valid commit SHA is not proof that the external execution used that commit. Repository evidence paths are references, not proof that a file exists or is genuine.
 
-The validator can check structure, required coverage, internal consistency, and obvious contradictions. It cannot establish that:
-
-- a Google execution actually happened;
-- an artifact came from the claimed Google project or deployment;
-- a timestamp or verifier identity is authentic;
-- an independent reviewer genuinely inspected the evidence;
-- Drive permissions were inspected accurately;
-- the observed outcome was not fabricated outside the repository.
-
-For this reason, the CI workflow is explicitly named repository validation, and its green result is **not** live Google security approval. The effective gate remains blocked until real tests are performed and the underlying evidence is independently reviewed through an authorized process.
+The independent reviewer must inspect the original test artifacts and execution context, including actual Drive sharing and inherited permissions. Keep private resource IDs, emails, credentials, OAuth tokens, secret URLs, raw private logs, and participant information out of committed evidence.
 
 ## Stage decision
 
-- Repository validator and tests: intended for automated validation.
+- Repository implementation: stricter structural validation and regression tests.
+- Automated validation: determined only by CI for the exact tested commit.
 - Live Google verification: **NOT VERIFIED**.
 - Effective live-security gate: **BLOCKED**.
-- AppSheet dashboards / Stage 5.6: **do not begin** until identity, tenant isolation, direct workbook access, revocation, audit, idempotency, concurrency/recovery, schema, and other mandatory live checks have passed and been reviewed.
+- Stage 5.6 dashboards: **do not begin** until identity, tenant isolation, direct workbook access, revocation, audit, idempotency, concurrency/recovery, schema, and other mandatory live checks have passed and the underlying evidence has been independently reviewed.

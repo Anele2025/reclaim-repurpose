@@ -56,7 +56,7 @@ function fixtures(actorId = "owner-a@example.invalid", memberships, options = {}
     releaseLock: () => { held = false; }
   }) };
   const service = context.ReclaimService.create({
-    identity: { resolveCurrentActor: () => actorId ? { ok: true, actorId } : { ok: false } },
+    identity: { resolveCurrentActor: () => { if (options.throwIdentity) throw new Error("synthetic identity outage"); return actorId ? { ok: true, actorId } : { ok: false }; } },
     session: {}, repository, authorization: context.ReclaimAuthorization, audit: context.ReclaimAudit,
     idempotency: context.ReclaimIdempotency, lockService,
     digest: value => "synthetic-digest:" + value,
@@ -209,4 +209,26 @@ test("handover cannot be applied to another organization's record", () => {
   });
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "COLLECTION_NOT_FOUND");
+});
+
+test("identity-provider exceptions and unexpected read fields fail closed", () => {
+  const outage = fixtures("owner-a@example.invalid", undefined, { throwIdentity: true });
+  assert.equal(outage.service.recordCollection(baseRequest()).error.code, "IDENTITY_UNAVAILABLE");
+  const f = fixtures();
+  const created = f.service.recordCollection(baseRequest());
+  assert.equal(f.service.getCollectionRecord({ organizationId:"ORG_A", collectionId:created.value.collectionId, actorId:"spoofed@example.invalid" }).error.code, "INVALID_REQUEST");
+});
+test("failed handover attempts produce a failure audit event", () => {
+  const f = fixtures();
+  const created = f.service.recordCollection(baseRequest());
+  f.service.recordCollectionHandover({
+    organizationId:"ORG_A", collectionId:created.value.collectionId,
+    destinationPartnerId:"PARTNER_1", handoverRef:"HANDOVER-001", operationId:"handover-op-0011"
+  });
+  const result = f.service.recordCollectionHandover({
+    organizationId:"ORG_A", collectionId:created.value.collectionId,
+    destinationPartnerId:"PARTNER_1", handoverRef:"HANDOVER-002", operationId:"handover-op-0012"
+  });
+  assert.equal(result.error.code, "HANDOVER_ALREADY_RECORDED");
+  assert.equal(f.state.auditEvents.some(e => e.action === "RECORD_COLLECTION_HANDOVER" && e.outcome === "FAILED"), true);
 });

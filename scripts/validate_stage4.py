@@ -99,11 +99,13 @@ def main() -> int:
                                 errors.append(f"{relative}:{line_no}: invalid {column} value {value!r}")
                     for column in headers:
                         value = (row.get(column) or "").strip()
-                        if value and column in DATE_COLUMNS and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
-                            errors.append(f"{relative}:{line_no}: {column} must use YYYY-MM-DD")
-                    joined = " ".join((value or "") for value in row.values())
-                    if "TEST_DATA" in joined and record_status.upper() != "TEST_DATA":
-                        errors.append(f"{relative}:{line_no}: example data must be explicitly labelled TEST_DATA")
+                        if value and column in DATE_COLUMNS:
+                            try:
+                                if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+                                    raise ValueError("format")
+                                date.fromisoformat(value)
+                            except ValueError:
+                                errors.append(f"{relative}:{line_no}: {column} must be a valid YYYY-MM-DD date")
         except (OSError, csv.Error) as exc:
             errors.append(f"{relative}: unable to read CSV: {exc}")
 

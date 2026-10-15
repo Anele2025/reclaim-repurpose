@@ -107,6 +107,10 @@ var ReclaimSheetsRepository = (function () {
         if (SCHEMAS[name].indexOf(key) < 0 || key === stable) throw new Error("FIELD_NOT_ALLOWED");
         var value = changes[key];
         if (!(value === null || ["string","number","boolean"].indexOf(typeof value) >= 0 || value instanceof Date)) throw new Error("INVALID_FIELD_TYPE");
+        if (key === "status" && name === "Organizations" && ["PROSPECT","ACTIVE","PAUSED","SUSPENDED","ARCHIVED"].indexOf(value) < 0) throw new Error("INVALID_ORGANIZATION_STATUS");
+        if (key === "status" && name === "Memberships" && ["INVITED","ACTIVE","SUSPENDED","REVOKED"].indexOf(value) < 0) throw new Error("INVALID_MEMBERSHIP_STATUS");
+        if (key === "status" && name === "Idempotency" && ["PROCESSING","SUCCEEDED","FAILED_RETRYABLE","RECONCILIATION_REQUIRED"].indexOf(value) < 0) throw new Error("INVALID_OPERATION_STATUS");
+        if (key === "serviceEnabled" && name === "Organizations" && typeof value !== "boolean") throw new Error("INVALID_ORGANIZATION_CONFIGURATION");
         record[key] = safeText(value);
       });
       sheet.getRange(matches[0].rowNumber, 1, 1, SCHEMAS[name].length)

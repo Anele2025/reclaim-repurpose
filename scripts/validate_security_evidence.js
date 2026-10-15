@@ -230,6 +230,7 @@ function main(argv) {
       evidenceAssessmentStatus: result.evidenceAssessmentStatus,
       liveSecurityGate: "BLOCKED",
       liveGateAuthorization: "NOT_GRANTED_BY_STRUCTURAL_VALIDATOR",
+      passedCaseCount: result.passedCaseCount,
       verifiedCaseCount: result.verifiedCaseCount,
       requiredCaseCount: result.requiredCaseCount,
       note: "This validator cannot authenticate Google execution or independently inspect evidence. A passing structural check is not live-security approval."

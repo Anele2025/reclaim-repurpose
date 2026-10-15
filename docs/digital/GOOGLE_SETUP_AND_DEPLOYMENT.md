@@ -1,18 +1,18 @@
-# Google Setup and Deployment — Stage 5.2
+# Google Setup and Deployment — Stage 5.3
 
 ## Status and boundary
 
-Stage 5.2 adds Apps Script-compatible backend modules and local tests. It does **not** mean a Google project, spreadsheet, AppSheet app, WhatsApp integration, or production service is deployed. No live Google account/project was available to verify in this repository implementation.
+Stage 5.3 adds an integrated, authorization-enforcing service boundary, audited organization-service configuration mutation, and recoverable idempotency orchestration. It does **not** mean a Google project, spreadsheet, AppSheet app, WhatsApp integration, or production service is deployed. No live Google account/project is verified by this repository implementation.
 
 ## Modules
 
 - `identity.js`: reads the active Apps Script user email and fails closed if unavailable. Email availability depends on execution/deployment context; this adapter is not proof that every target account will be identifiable.
-- `authorization.js`: central membership, role, organization status, service-enabled, and record-scope policy.
-- `sheetsRepository.js`: allow-listed sheet names, required headers, stable ID lookups, duplicate-row detection, and formula-leading string escaping.
-- `audit.js`: safe structured audit writes and fail-closed result when persistence fails.
-- `idempotency.js`: durable row reservation under a ScriptLock, duplicate/conflicting payload detection, and safe lock/store errors.
-- `service.js`: injected application service; currently exposes only a minimal organization-summary read.
-- `entrypoints.js`: controlled Apps Script function; no public `doGet` or `doPost` endpoint is exposed.
+- `authorization.js`: retained central policy helpers; the service now independently resolves trusted memberships for every implemented operation.
+- `sheetsRepository.js`: allow-listed sheets, exact header-width checks, typed writes, stable-ID updates, duplicate detection, and text formula-marker escaping. Idempotency schema now includes `resultJson` and `correlationId`.
+- `audit.js`: validates required event fields and persists a bounded safe event shape; failures return safe codes.
+- `idempotency.js`: holds a script lock across reservation and the bounded mutation, stores a successful result for identical retries, rejects conflicting payloads, and flags uncertain outcomes for reconciliation.
+- `service.js`: company-owner organization summary read plus platform-admin organization service-enable/disable mutation, with trusted membership resolution, audit and idempotency.
+- `entrypoints.js`: controlled Apps Script functions for the implemented reads and mutation, server-side SHA-256 payload digest, and no public `doGet` or `doPost` endpoint.
 
 ## Deployment and identity decision
 
@@ -27,7 +27,7 @@ Set Script Property `RECLAIM_SPREADSHEET_ID` to the dedicated synthetic-data tes
 - `Organizations`: `organizationId, organizationName, country, currency, status, serviceEnabled, configVersion, createdAt, updatedAt`
 - `Memberships`: `membershipId, organizationId, actorId, role, status, createdAt, updatedAt, revokedAt`
 - `AuditEvents`: `eventId, timestamp, actorId, organizationId, action, outcome, reasonCode, operationId, recordRef, configVersion`
-- `Idempotency`: `operationId, actorId, organizationId, operationType, payloadDigest, status, resultRef, createdAt, updatedAt`
+- `Idempotency`: `operationId, actorId, organizationId, operationType, payloadDigest, status, resultRef, createdAt, updatedAt, resultJson, correlationId`
 
 Protect the spreadsheet so only project administrators and the required script execution identity can access it. Spreadsheet IDs are locators, not authorization. Do not share the underlying workbook with company owners unless a separate reviewed security design proves direct access cannot bypass the application boundary.
 
@@ -42,16 +42,27 @@ python scripts/validate_stage4.py
 
 Tests use synthetic data and test doubles. They do not prove live Apps Script identity, actual Sheets permissions, concurrency across Google executions, AppSheet isolation, or deployed security.
 
-## Important limitations to close before production
+## Security behavior and remaining limitations
 
-- **Not a full transaction:** Sheets writes across multiple rows are not atomic. The idempotency adapter reserves a PROCESSING record under ScriptLock, but Stage 5.2 does not yet implement safe completion updates, interrupted-write reconciliation, or automatic stale-operation recovery. Do not use it as complete production idempotency yet.
-- **Digest responsibility:** the caller/service must calculate a stable payload digest on the server; never trust a caller-provided digest in a public API.
-- **Authorization integration:** policy modules are tested, but every future read/write service must call them using membership and organization records loaded from trusted repository methods. Platform-admin membership resolution still needs an explicit global-admin lookup path before admin actions are implemented.
-- **Sheet writes:** formula-leading strings are escaped, but date/number validation and field-specific schema validation remain required for each operational write.
-- **Audit guarantees:** audit helper reports failure, but mutation orchestration must stop or reconcile if required audit persistence fails.
-- **Schema version:** required headers are checked; the current adapter does not yet persist or enforce a versioned migration registry.
-- **Performance and quotas:** repository lookups currently read configured tables; measure scale and quota behavior before real use.
+- **Authorization:** The organization-summary operation requires an active `COMPANY_OWNER` membership scoped to the requested organization. The service-configuration mutation requires an active `PLATFORM_ADMIN` membership with a trusted global scope (`organizationId` blank or `PLATFORM`). Request-supplied identity, role, membership and digest are not trusted.
+- **Organization status:** Company-owner operational reads require `ACTIVE` status and enabled service. `PROSPECT` is not operationally enabled. Platform administrators may change the service-enabled flag for non-archived organizations, including paused/suspended organizations, but this does not activate or unsuspend an organization.
+- **Idempotency:** States are `PROCESSING`, `SUCCEEDED`, `FAILED_RETRYABLE`, and `RECONCILIATION_REQUIRED`. The shared ScriptLock is held through the bounded Sheets mutation. An identical `SUCCEEDED` retry returns its recorded result. A conflicting payload is denied. Existing `PROCESSING` and uncertain operations are not replayed automatically.
+- **Recovery:** Uncertain writes, unreadable stored results, and post-write audit failures require reconciliation. No automated stale-operation worker or full multi-sheet transaction is implemented. Preserve unresolved operation rows and investigate the referenced organization and audit events before any manual action.
+- **Audit:** A required pre-write audit event must persist before the organization setting changes. If a post-write audit fails, the operation is marked `RECONCILIATION_REQUIRED` when storage permits; callers must not retry blindly.
+- **Storage schema:** The Idempotency sheet now requires 11 exact columns, including `resultJson` and `correlationId`. This is a Stage 5.3 schema change. There is no verified live workbook; update only a disposable synthetic test sheet by backing it up and recreating the exact header before integration testing. Do not run a silent migration against real operational data.
+- **Google transaction limits:** A ScriptLock coordinates executions that use this same script/lock scope; it does not create a general transaction across Google Sheets, protect against direct spreadsheet edits, or prove behavior for other scripts/projects. Exactly-once execution is not claimed.
+- **Identity:** `Session.getActiveUser().getEmail()` can be empty depending on account and execution context. Verify the exact deployment model. Do not expose a public/anonymous web app or execute as owner for untrusted callers.
+- **Performance and quotas:** repository reads still scan configured tables. Measure actual size, quotas and concurrent execution behavior before use. The service does not yet implement broad operational CRUD or an AppSheet integration.
+- **Live verification:** Local tests and GitHub Actions do not prove real Apps Script identity, spreadsheet permissions, locking, AppSheet isolation, quota behavior or production security.
 
+## Local verification
+
+Use Node.js 22 and run:
+
+```sh
+node --test apps-script/tests/*.test.js
+python scripts/validate_stage4.py
+```
 ## Test-project procedure
 
 1. Create a dedicated Apps Script project and synthetic test spreadsheet.

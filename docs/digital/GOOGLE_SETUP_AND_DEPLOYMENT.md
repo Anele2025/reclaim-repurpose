@@ -163,3 +163,50 @@ The session marker reduces duplicate state transitions after a successful sessio
 Automated tests now cover event lifecycle statuses, conflicting IDs, duplicate/in-progress handling, retry after a session-write failure, uncertain completion errors, and the existing registration conversation. The tests use in-memory adapters and synchronous lock simulation. They do not prove concurrency safety or durability in Apps Script/Google Sheets.
 
 Before provider-specific implementation, select a provider and verify its official raw-body authentication, receiving-account identity, event IDs, challenge, acknowledgement/retry, inbound location payload, outbound-message and rate-limit requirements. The selected provider's receiving-account identity must map through administrator-controlled configuration to exactly one active organization. Secrets must be stored in supported deployment configuration and must never be committed to source.
+
+
+## Stage 5.11 — durable WhatsApp registration Sheets adapter
+
+**Status: repository implementation and synthetic-adapter tests only; no live Google project or workbook has been accessed.** The provider-independent adapter is in `apps-script/src/whatsappSheetsStore.js`. It is included in the deterministic package before `whatsappRegistration.js`. It exposes factories for the event ledger, session store, registration store, explicit schema initialization, and bounded reconciliation. A future authorized Apps Script integration must create the adapter with a spreadsheet object, `LockService`, and a clock. The adapter uses Apps Script `Utilities.computeDigest(SHA_256)` by default; tests may inject a deterministic digest. No spreadsheet ID or credentials belong in source control.
+
+### Version 1 tabs
+
+Call `initialize()` only against a dedicated synthetic test workbook or a deliberately approved empty workbook. It creates missing tabs and writes headers only when the first row is empty and the sheet has no data. A non-empty incompatible schema fails closed; this stage does not silently migrate existing operational data.
+
+| Tab | Columns |
+| --- | --- |
+| Events | `schemaVersion, scopeKey, eventId, digest, status, claimToken, claimedAt, leaseExpiresAt, attempts, createdAt, updatedAt, completedAt, resultJson, lastErrorCode` |
+| Sessions | `schemaVersion, scopeKey, organizationId, senderKey, sessionJson, updatedAt, expiresAt` |
+| Registrations | `schemaVersion, organizationId, registrationId, operationId, payloadFingerprint, payloadJson, status, createdAt, updatedAt` |
+| Audit | `schemaVersion, occurredAt, kind, organizationId, recordKey, outcome, diagnosticCode` |
+
+All rows use schema version 1. Event and session scope keys combine the trusted organization with the configured receiving-account scope. Do not derive either value from customer message text. The current workflow contract passes organization IDs to the event store, so instantiate an event/session adapter for the administrator-controlled provider-account scope selected by the future ingress integration.
+
+### Persistence and retry semantics
+
+- A single Apps Script `ScriptLock` serializes adapter operations in this script/lock scope. The adapter uses bounded `tryLock` waits and releases the lock in `finally`. Nested adapter calls in the same execution reuse the held lock to avoid self-deadlock.
+- Event states include `PROCESSING`, `COMPLETE`, `RETRYABLE`, and `RECONCILIATION_REQUIRED`. A completed matching event is a replay; conflicting digest reuse is rejected; an active processing claim is not treated as complete.
+- An expired processing lease is **quarantined for reconciliation/manual review**, not automatically stolen. A lease expiring does not prove that an earlier Apps Script execution stopped.
+- Registration creation checks both the tenant-scoped registration ID and operation ID under the script lock. A matching payload returns idempotent success; conflicting reuse or duplicate rows returns a conflict/manual-review outcome. The payload fingerprint is computed over canonicalized registration fields using Apps Script SHA-256 by default; tests may inject a deterministic digest.
+- Session clears use a tombstone instead of deleting the row. Expired sessions are not returned to the workflow. The audit tab intentionally avoids storing message bodies or extra personal data; audit writes are best-effort and must not be treated as an immutable compliance ledger.
+- Reconciliation has a configurable maximum batch size (default 50, hard maximum 500), quarantines expired claims, and records duplicate-operation findings within the inspected registration batch. It never deletes registrations or resends outbound messages.
+
+### Critical limitations
+
+Google Sheets is not a transactional database. Appending a registration, updating an event row, writing a session, and recording audit evidence are separate operations. A successful ScriptLock coordinates only executions that share this script lock; it does not protect against direct spreadsheet edits, other Apps Script projects, or external writers. Reads still scan sheet rows to find identifiers. Production scale, quotas, and execution duration have not been measured.
+
+The current Stage 5.10 workflow calls `eventStore.complete(eventId, digest, organizationId, result)` without passing the claim token. Consequently, the adapter cannot provide a fully fenced compare-and-set across independent executions. It checks current row state and quarantines expired claims, but this interface is not sufficient to prove stale-worker exclusion in every race. Before production use, a reviewed workflow-contract change must pass the claim token through completion and release and verify it against the stored token. Do not claim exactly-once processing.
+
+Reconciliation does not infer a successful registration solely from an event being processed. Because the current event record does not durably link its claim to the registration operation ID before processing, expired or inconsistent claims remain manual-review cases rather than being automatically marked complete. Outbound messaging, provider-specific authentication, receiving-account routing, live Sheets permissions, live Apps Script concurrency, and deployment remain unimplemented/unverified.
+
+### Safe integration procedure
+
+1. Create a separate Apps Script test project and a disposable spreadsheet populated only with synthetic records.
+2. Configure the spreadsheet ID as a Script Property in that test project; do not place it in source files.
+3. Restrict direct workbook access independently of script authorization and grant only reviewed Apps Script scopes.
+4. Initialize schema version 1 only in the disposable workbook. Back up and review any existing data before considering schema migration.
+5. Verify event retries, operation conflicts, lock contention, session expiry, partial-write behavior, and reconciliation with synthetic accounts.
+6. Record the exact code commit, deployment mode, test time, and observed outcomes without storing secrets or customer details.
+7. Keep deployment disabled until provider-specific request authentication, stable claim fencing, idempotent persistence, and recovery behavior have passed independent review.
+
+A passing CI run verifies the synthetic adapter contract and package only. It does not prove real Google permissions, Sheets write behavior, quotas, deployment identity, or production readiness.

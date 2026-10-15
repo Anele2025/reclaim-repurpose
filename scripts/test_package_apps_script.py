@@ -33,7 +33,7 @@ class PackageAppsScriptTests(unittest.TestCase):
                     packager.load_manifest()
 
     def test_package_is_deterministic_and_contains_only_deployable_files(self):
-        with tempfile.TemporaryDirectory(dir=packager.ROOT / "dist") as first_parent, tempfile.TemporaryDirectory(dir=packager.ROOT / "dist") as second_parent:
+        with tempfile.TemporaryDirectory(dir=packager.ROOT) as first_parent, tempfile.TemporaryDirectory(dir=packager.ROOT) as second_parent:
             first = packager.build(Path(first_parent) / "package")
             second = packager.build(Path(second_parent) / "package")
             self.assertEqual(sorted(p.name for p in first.iterdir()), ["Code.gs", "appsscript.json"])
@@ -49,7 +49,7 @@ class PackageAppsScriptTests(unittest.TestCase):
             self.assertNotIn("require(", code)
 
     def test_missing_source_module_fails_closed(self):
-        with tempfile.TemporaryDirectory(dir=packager.ROOT / "dist") as tmp:
+        with tempfile.TemporaryDirectory(dir=packager.ROOT) as tmp:
             source = packager.SOURCE_DIR / packager.MODULE_ORDER[0]
             with mock.patch.object(packager, "SOURCE_DIR", Path(tmp) / "missing-source"):
                 with self.assertRaises(SystemExit):

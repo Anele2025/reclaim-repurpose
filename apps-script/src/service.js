@@ -181,7 +181,7 @@ var ReclaimService = (function () {
       if (typeof request.operationId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/.test(request.operationId)) return { ok: false, error: { code: "INVALID_OPERATION_ID", message: "A valid operation ID is required." } };
       var value = { organizationId: request.organizationId, siteId: request.siteId, operationId: request.operationId };
       if (mode === "CREATE" || (mode === "UPDATE" && Object.prototype.hasOwnProperty.call(request, "siteName"))) {
-        if (typeof request.siteName !== "string" || !request.siteName.trim() || request.siteName.trim().length > 120 || /[\\u0000-\\u001F]/.test(request.siteName)) return { ok: false, error: { code: "INVALID_SITE_NAME", message: "Site name must contain 1–120 safe characters." } };
+        if (typeof request.siteName !== "string" || !request.siteName.trim() || request.siteName.trim().length > 120 || /[\u0000-\u001F]/.test(request.siteName)) return { ok: false, error: { code: "INVALID_SITE_NAME", message: "Site name must contain 1–120 safe characters." } };
         value.siteName = request.siteName.trim();
       }
       if (mode === "CREATE" || (mode === "UPDATE" && Object.prototype.hasOwnProperty.call(request, "country"))) {

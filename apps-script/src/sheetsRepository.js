@@ -5,11 +5,12 @@ var ReclaimSheetsRepository = (function () {
     Organizations: ["organizationId","organizationName","country","currency","status","serviceEnabled","configVersion","createdAt","updatedAt"],
     Memberships: ["membershipId","organizationId","actorId","role","status","createdAt","updatedAt","revokedAt"],
     AuditEvents: ["eventId","timestamp","actorId","organizationId","action","outcome","reasonCode","operationId","recordRef","configVersion"],
-    Idempotency: ["operationId","actorId","organizationId","operationType","payloadDigest","status","resultRef","createdAt","updatedAt","resultJson","correlationId"]
+    Idempotency: ["operationId","actorId","organizationId","operationType","payloadDigest","status","resultRef","createdAt","updatedAt","resultJson","correlationId"],
+    CollectionRecords: ["collectionId","organizationId","siteId","collectedAt","materialCategory","quantity","unit","collectorRef","destinationPartnerId","handoverRef","evidenceRef","status","createdAt","updatedAt","createdBy","operationId"]
   });
   var STABLE_IDS = Object.freeze({
     Organizations: "organizationId", Memberships: "membershipId",
-    AuditEvents: "eventId", Idempotency: "operationId"
+    AuditEvents: "eventId", Idempotency: "operationId", CollectionRecords: "collectionId"
   });
   function safeText(value) {
     if (typeof value !== "string") return value;
@@ -63,7 +64,8 @@ var ReclaimSheetsRepository = (function () {
         Organizations: ["organizationId","organizationName","country","currency","status","serviceEnabled","configVersion"],
         Memberships: ["membershipId","organizationId","actorId","role","status"],
         AuditEvents: ["eventId","timestamp","action","outcome"],
-        Idempotency: ["operationId","actorId","organizationId","operationType","payloadDigest","status","correlationId"]
+        Idempotency: ["operationId","actorId","organizationId","operationType","payloadDigest","status","correlationId"],
+        CollectionRecords: ["collectionId","organizationId","siteId","collectedAt","materialCategory","quantity","unit","status","createdAt","updatedAt","createdBy","operationId"]
       }[name];
       if (required && required.some(function (key) { return record[key] === undefined || record[key] === null || String(record[key]).trim() === ""; })) {
         throw new Error("REQUIRED_FIELD_MISSING");
@@ -80,6 +82,13 @@ var ReclaimSheetsRepository = (function () {
         if (record.role === "PLATFORM_ADMIN" && record.organizationId && record.organizationId !== "PLATFORM") throw new Error("INVALID_ADMIN_SCOPE");
       }
       if (name === "Idempotency" && ["PROCESSING","SUCCEEDED","FAILED_RETRYABLE","RECONCILIATION_REQUIRED"].indexOf(record.status) < 0) throw new Error("INVALID_OPERATION_STATUS");
+      if (name === "CollectionRecords") {
+        if (!/^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/.test(String(record.organizationId)) || !/^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/.test(String(record.siteId))) throw new Error("INVALID_COLLECTION_SCOPE");
+        if (typeof record.quantity !== "number" || !isFinite(record.quantity) || record.quantity <= 0) throw new Error("INVALID_COLLECTION_QUANTITY");
+        if (["PLASTIC","PAPER","CARDBOARD","GLASS","METAL","ORGANIC","E_WASTE","TEXTILES","MIXED_RECYCLABLES","OTHER"].indexOf(record.materialCategory) < 0) throw new Error("INVALID_MATERIAL_CATEGORY");
+        if (["kg","g","tonne","item","bag","litre"].indexOf(record.unit) < 0) throw new Error("INVALID_COLLECTION_UNIT");
+        if (["RECORDED","HANDED_OVER"].indexOf(record.status) < 0) throw new Error("INVALID_COLLECTION_STATUS");
+      }
       if (name === "AuditEvents" && ["SUCCEEDED","DENIED","ATTEMPTED","FAILED","REPLAYED","RECOVERED"].indexOf(record.outcome) < 0) throw new Error("INVALID_AUDIT_OUTCOME");
       var existing = stable ? findAll(name, stable, record[stable]) : [];
       if (existing.length) throw new Error("DUPLICATE_STABLE_ID");
@@ -111,6 +120,8 @@ var ReclaimSheetsRepository = (function () {
         if (key === "status" && name === "Memberships" && ["INVITED","ACTIVE","SUSPENDED","REVOKED"].indexOf(value) < 0) throw new Error("INVALID_MEMBERSHIP_STATUS");
         if (key === "status" && name === "Idempotency" && ["PROCESSING","SUCCEEDED","FAILED_RETRYABLE","RECONCILIATION_REQUIRED"].indexOf(value) < 0) throw new Error("INVALID_OPERATION_STATUS");
         if (key === "serviceEnabled" && name === "Organizations" && typeof value !== "boolean") throw new Error("INVALID_ORGANIZATION_CONFIGURATION");
+        if (name === "CollectionRecords" && key === "status" && ["RECORDED","HANDED_OVER"].indexOf(value) < 0) throw new Error("INVALID_COLLECTION_STATUS");
+        if (name === "CollectionRecords" && key === "quantity" && (typeof value !== "number" || !isFinite(value) || value <= 0)) throw new Error("INVALID_COLLECTION_QUANTITY");
         record[key] = safeText(value);
       });
       sheet.getRange(matches[0].rowNumber, 1, 1, SCHEMAS[name].length)
@@ -146,6 +157,14 @@ var ReclaimSheetsRepository = (function () {
       appendAudit: function (event) { return append("AuditEvents", event); },
       appendIdempotency: function (record) { return append("Idempotency", record); },
       updateOperation: function (id, changes) { return updateById("Idempotency", id, changes); },
+      appendCollectionRecord: function (record) { return append("CollectionRecords", record); },
+      findCollectionRecord: function (id) { return findUnique("CollectionRecords", "collectionId", id); },
+      findCollectionRecordsForOrganization: function (organizationId, limit) {
+        var rowsForOrg = findAll("CollectionRecords", "organizationId", organizationId);
+        rowsForOrg.sort(function (a, b) { return String(b.collectedAt).localeCompare(String(a.collectedAt)); });
+        return rowsForOrg.slice(0, Math.max(1, Math.min(Number(limit) || 100, 200)));
+      },
+      updateCollectionRecord: function (id, changes) { return updateById("CollectionRecords", id, changes); },
       schemas: SCHEMAS
     });
   }

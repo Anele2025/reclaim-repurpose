@@ -86,3 +86,34 @@ Botswana and Eswatini must be assessed separately. Before operating in either co
 ## CSV use
 
 These files are spreadsheet-ready templates, not a connected database or a Google Sheets workbook. Import them into a spreadsheet or approved record system; preserve IDs, dates, units, and currency codes. The included sample rows are fictional and must not be reported as actual activity. CSV alone does not enforce access control, validation, audit logs, or referential integrity.
+
+
+## Stage 3 — operating controls and additional records
+
+The following documents define how to operate the process described by the Stage 1 templates. They are draft procedures for pilot preparation, not evidence that a site, destination or activity is approved.
+
+- [Pilot operating procedures](PILOT_OPERATING_PROCEDURES.md) — end-to-end workflow, responsibilities, evidence, stop/restart and offline fallback.
+- [Collection and weighing SOP](COLLECTION_AND_WEIGHING_SOP.md) — screening, weighing, units and collection close.
+- [Sorting, storage and handover SOP](SORTING_STORAGE_AND_HANDOVER_SOP.md) — batch lineage, custody, destination evidence and downstream outcomes.
+- [Exceptions, incidents and corrective actions](EXCEPTIONS_INCIDENTS_AND_CORRECTIVE_ACTIONS.md) — severity, containment, investigation and closure.
+- [Safety and compliance checklist](SAFETY_AND_COMPLIANCE_CHECKLIST.md) — separate BW/SZ checks and mandatory stop gates.
+- [Daily and monthly reconciliation](DAILY_AND_MONTHLY_RECONCILIATION.md) — material balance, financial reconciliation and reporting.
+- [Handover checklist](../../templates/operations/handover_checklist.csv) — one row per handover/material stream.
+- [Exception log](../../templates/operations/exception_log.csv) — exception and corrective-action lifecycle.
+- [Compliance verification register](../../templates/operations/compliance_verification.csv) — country/site/activity-specific requirement checks.
+
+### Stage 3 record relationships
+
+- A handover references a batch, site, country, destination reference and supporting material event(s). A handover is not a new collection.
+- An exception references the affected collection and/or batch when known. Missing references must be explained rather than fabricated.
+- A compliance verification is scoped to a country and specific site/activity/requirement. Botswana and Eswatini checks are independent.
+- Corrections must preserve the original event and evidence trail. Append a correction with reason, editor, time and reviewer rather than silently replacing historical facts.
+- The operational finance ledger remains the transaction register unless a future approved design explicitly selects another single source of truth. Stage 2 scenario/cost/revenue templates are planning tools; avoid duplicating actual transactions.
+
+### Handover quantity rules
+
+Record offered, accepted and rejected amounts in the same unit whenever possible. Accepted plus rejected should not exceed offered unless a documented conversion, measurement correction or destination explanation accounts for it. The remainder is unresolved until evidence explains it; do not automatically label it a loss or rejection. If units differ, retain original values and record the conversion basis. Do not add collection, sorting, acceptance, reuse and recycling quantities together because these are successive states of the same material.
+
+### Test and operational data
+
+Rows with TEST_DATA classification are fictional examples and are not real collections, permits, partners, receipts or outcomes. Before operational use, use an approved access-controlled record system, remove or clearly isolate examples, verify actual permissions and destinations, and protect personal/confidential data. CSV files alone do not provide authentication, access control, referential integrity or an immutable audit log.

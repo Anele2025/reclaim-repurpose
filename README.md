@@ -64,7 +64,7 @@ All included sample rows are fictional test data. CSV templates do not enforce a
 - [ ] **Stage 5.1 — Architecture baseline and implementation preparation:** implementation and validation changes are in unmerged PR #5.
 - [ ] **Stage 5.2 — Authenticated Apps Script backend foundation:** backend adapter foundation is in unmerged PR #6; live Google identity and storage behavior remain unverified.
 - [ ] **Stage 5.3 — Secure service and recovery:** authorization, audit and idempotent mutation remediation is in an unmerged review branch; CI and final review evidence pending.
-- [ ] **Next — Authenticated Apps Script execution and server-side membership lookup:** configure an authorized Google project, implement server-side identity/membership checks and protected Sheets access, and verify with synthetic negative tests.
+- [ ] **Next — Stage 5.4 Google integration and source-packaging gate:** establish an authorized synthetic test project, verify Apps Script identity/permissions/locking, confirm the .js-to-Apps-Script deployment workflow, and exercise the service against a disposable workbook before AppSheet integration.
 - [ ] **Following — AppSheet dashboards:** configure the administrator dashboard and separately restricted organization-owner dashboards after server/data-source security is verified.
 - [ ] **Following — WhatsApp integration:** select and verify a provider, then implement signed webhook validation, replay protection, retries and failure monitoring.
 - [ ] **Physical pilot gate:** begin only after applicable legal, site, safety, customer, and receiving-partner requirements are evidenced as satisfied.

@@ -245,5 +245,6 @@
       "independentReviewCompleted": false,
       "review": null
     }
-  ]
+  ],
+  "evidenceAssessmentStatus": "BLOCKED"
 }

@@ -1,0 +1,3 @@
+CostID,RecordStatus,CountryCode,PilotID,SiteID,CostCategory,CostDescription,CostBehaviour,CostTiming,Quantity,Unit,UnitPrice,CurrencyCode,TotalCost,PlanActualStatus,PaymentStatus,EvidenceRef,TransactionDate,Notes
+TEST-COST-001,TEST_DATA,BW,TEST-PILOT-BW,TEST-SITE-BW,TRANSPORT,Fictional transport trip,VARIABLE,RECURRING,1,trip,80,BWP,"=IF(OR(J2="""",L2=""""),"""",J2*L2)",PLANNED,PENDING,TEST-ONLY,2026-10-15,Fictional only; obtain a real quote.
+TEST-COST-002,TEST_DATA,SZ,TEST-PILOT-SZ,TEST-SITE-SZ,PPE,Fictional safety supplies placeholder,FIXED,ONE_TIME,1,bundle,0,SZL,"=IF(OR(J3="""",L3=""""),"""",J3*L3)",PLANNED,PENDING,TEST-ONLY,2026-10-15,"Zero is illustrative, not an estimate; replace before decision."

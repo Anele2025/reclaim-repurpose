@@ -1,18 +1,23 @@
 /**
- * No doGet/doPost is intentionally exposed in Stage 5.2.
- * These functions are for a controlled Apps Script execution context, not a public API.
- * Confirm Session identity behavior for the deployed account and execution model before use.
+ * Restricted Apps Script entry points. No public doGet/doPost endpoint is exposed.
+ * Identity availability must be verified for the chosen execution model before deployment.
  */
 function reclaimGetMyOrganizationSummary(organizationId) {
-  try {
-    var props = PropertiesService.getScriptProperties();
-    var repository = ReclaimSheetsRepository.create(SpreadsheetApp, props);
-    var service = ReclaimService.create({
-      identity: ReclaimIdentity, session: Session,
-      authorization: ReclaimAuthorization, repository: repository
-    });
-    return service.getOrganizationSummary({ organizationId: organizationId });
-  } catch (_) {
-    return { ok: false, error: { code: "SERVICE_UNAVAILABLE", message: "Request could not be completed." } };
-  }
+  return reclaimCreateService().getOrganizationSummary({ organizationId: organizationId });
+}
+function reclaimSetOrganizationServiceEnabled(request) {
+  return reclaimCreateService().setOrganizationServiceEnabled(request);
+}
+function reclaimCreateService() {
+  var props = PropertiesService.getScriptProperties();
+  var repository = ReclaimSheetsRepository.create(SpreadsheetApp, props);
+  return ReclaimService.create({
+    identity: ReclaimIdentity, session: Session, authorization: ReclaimAuthorization,
+    repository: repository, audit: ReclaimAudit, idempotency: ReclaimIdempotency,
+    lockService: LockService, utilities: Utilities,
+    digest: function (value) {
+      var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, value, Utilities.Charset.UTF_8);
+      return bytes.map(function (b) { return ("0" + ((b + 256) % 256).toString(16)).slice(-2); }).join("");
+    }
+  });
 }

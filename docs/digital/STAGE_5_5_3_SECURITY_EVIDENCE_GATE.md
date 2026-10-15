@@ -73,7 +73,7 @@ The manifest enumerates 13 cases:
 12. Formula-injection safety.
 13. AppSheet-to-service authentication, once an actual integration path has been designed.
 
-The committed baseline marks all 13 `NOT_STARTED`. AppSheet authentication remains unselected and unverified.
+The committed baseline marks all 13 cases `NOT_EXECUTED` with environment `NOT_STARTED`. AppSheet authentication remains unselected and unverified.
 
 ## What automation can and cannot prove
 

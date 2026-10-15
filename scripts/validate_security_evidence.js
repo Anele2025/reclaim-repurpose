@@ -8,7 +8,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const STATES = new Set(["NOT_STARTED", "IN_PROGRESS", "BLOCKED", "FAILED", "VERIFIED"]);
+const CASE_STATES = new Set(["NOT_EXECUTED", "AWAITING_INDEPENDENT_REVIEW", "BLOCKED", "FAIL", "PASS"]);
+const ASSESSMENT_STATES = new Set(["BLOCKED", "AWAITING_INDEPENDENT_REVIEW", "FAIL", "PASS"]);
 const ENVIRONMENTS = new Set(["NOT_STARTED", "SYNTHETIC", "GOOGLE_LIVE"]);
 const REQUIRED_CASES = Object.freeze([
   ["LIVE-IDENTITY", "Actual Apps Script execution identity"],
@@ -105,8 +106,8 @@ function requireNullableEvidenceFields(item, prefix) {
   if (item.review !== null) fail(prefix + ".review must be null before completed independent review");
   if (item.independentReviewCompleted !== false) fail(prefix + ".independentReviewCompleted must be false");
 }
-function validateVerifiedCase(item, prefix) {
-  if (item.environment !== "GOOGLE_LIVE") fail(prefix + " cannot be VERIFIED outside GOOGLE_LIVE");
+function validateExecutedCase(item, prefix, reviewState) {
+  if (item.environment !== "GOOGLE_LIVE") fail(prefix + " requires GOOGLE_LIVE evidence");
   if (!validDate(item.executedAt)) fail(prefix + ".executedAt must be a real ISO timestamp with timezone");
   if (!SHA_RE.test(item.executionCommitSha || "")) fail(prefix + ".executionCommitSha must be a full commit SHA");
   if (!nonEmpty(item.expectedOutcome) || !nonEmpty(item.observedOutcome)) fail(prefix + " requires expected and observed outcomes");
@@ -115,25 +116,31 @@ function validateVerifiedCase(item, prefix) {
     fail(prefix + " executionMethod cannot describe mock-only evidence");
   }
   if (item.verifierRole !== "AUTHORIZED_PROJECT_OWNER") fail(prefix + " requires an authorized project owner as verifier");
-  if (item.independentReviewRequired !== true || item.independentReviewCompleted !== true) {
-    fail(prefix + " requires completed independent review");
-  }
-  if (!isObject(item.review)) fail(prefix + ".review is required for VERIFIED evidence");
-  exactKeys(item.review, REVIEW_KEYS, prefix + ".review");
-  requiredKeys(item.review, REVIEW_KEYS, prefix + ".review");
-  if (item.review.reviewerRole !== "INDEPENDENT_REVIEWER" || item.review.decision !== "APPROVED" ||
-      !validDate(item.review.reviewedAt) || !validEvidenceRef(item.review.reviewRecordRef)) {
-    fail(prefix + ".review must identify an independent approval record and timestamp");
-  }
-  if (Date.parse(item.review.reviewedAt) < Date.parse(item.executedAt)) {
-    fail(prefix + ".review.reviewedAt cannot precede execution");
+  if (item.independentReviewRequired !== true) fail(prefix + " requires independent review");
+  if (reviewState === "approved") {
+    if (item.independentReviewCompleted !== true || !isObject(item.review)) {
+      fail(prefix + " PASS requires completed independent review");
+    }
+    exactKeys(item.review, REVIEW_KEYS, prefix + ".review");
+    requiredKeys(item.review, REVIEW_KEYS, prefix + ".review");
+    if (item.review.reviewerRole !== "INDEPENDENT_REVIEWER" || item.review.decision !== "APPROVED" ||
+        !validDate(item.review.reviewedAt) || !validEvidenceRef(item.review.reviewRecordRef)) {
+      fail(prefix + ".review must identify an independent approval record and timestamp");
+    }
+    if (Date.parse(item.review.reviewedAt) < Date.parse(item.executedAt)) {
+      fail(prefix + ".review.reviewedAt cannot precede execution");
+    }
+  } else {
+    if (item.independentReviewCompleted !== false || item.review !== null) {
+      fail(prefix + " cannot claim completed independent review before approval");
+    }
   }
 }
 function deriveGateStatus(cases) {
-  if (cases.some(item => item.status === "FAILED")) return "FAILED";
-  if (cases.some(item => item.status === "BLOCKED" || item.status === "NOT_STARTED")) return "BLOCKED";
-  if (cases.some(item => item.status === "IN_PROGRESS")) return "IN_PROGRESS";
-  return "VERIFIED";
+  if (cases.some(item => item.status === "FAIL")) return "FAIL";
+  if (cases.some(item => item.status === "BLOCKED" || item.status === "NOT_EXECUTED")) return "BLOCKED";
+  if (cases.some(item => item.status === "AWAITING_INDEPENDENT_REVIEW")) return "AWAITING_INDEPENDENT_REVIEW";
+  return "PASS";
 }
 function validateManifest(manifest) {
   if (!isObject(manifest)) fail("Manifest must be a JSON object");
@@ -147,7 +154,7 @@ function validateManifest(manifest) {
       !manifest.gateLimitations.every(nonEmpty)) fail("gateLimitations must be a non-empty array of strings");
   if (!Array.isArray(manifest.cases)) fail("cases must be an array");
   if (manifest.gateStatus !== "BLOCKED") fail("gateStatus must remain BLOCKED: this structural validator cannot authorize the live-security gate");
-  if (!STATES.has(manifest.evidenceAssessmentStatus)) fail("evidenceAssessmentStatus is unsupported");
+  if (!ASSESSMENT_STATES.has(manifest.evidenceAssessmentStatus)) fail("evidenceAssessmentStatus is unsupported");
   hasPlaceholder(manifest, "manifest");
 
   const seen = new Set();
@@ -163,7 +170,7 @@ function validateManifest(manifest) {
     if (!REQUIRED_IDS.has(item.testCaseId)) fail("Unknown test-case identifier: " + item.testCaseId);
     if (seen.has(item.testCaseId)) fail("Duplicate test-case identifier: " + item.testCaseId);
     seen.add(item.testCaseId);
-    if (!STATES.has(item.status)) fail(prefix + ".status is unsupported");
+    if (!CASE_STATES.has(item.status)) fail(prefix + ".status is unsupported");
     if (!ENVIRONMENTS.has(item.environment)) fail(prefix + ".environment is unsupported");
     if (!SHA_RE.test(item.baselineCommitSha || "")) fail(prefix + ".baselineCommitSha must be a full commit SHA");
     if (item.baselineCommitSha !== manifest.baselineCommitSha) fail(prefix + ".baselineCommitSha must match the manifest baseline");
@@ -174,10 +181,12 @@ function validateManifest(manifest) {
     if (typeof item.independentReviewRequired !== "boolean" || typeof item.independentReviewCompleted !== "boolean") {
       fail(prefix + " review flags must be booleans");
     }
-    if (item.status === "VERIFIED") {
-      validateVerifiedCase(item, prefix);
-    } else if (item.status === "NOT_STARTED") {
-      if (item.environment !== "NOT_STARTED") fail(prefix + " NOT_STARTED status requires NOT_STARTED environment");
+    if (item.status === "PASS") {
+      validateExecutedCase(item, prefix, "approved");
+    } else if (item.status === "AWAITING_INDEPENDENT_REVIEW") {
+      validateExecutedCase(item, prefix, "pending");
+    } else if (item.status === "NOT_EXECUTED") {
+      if (item.environment !== "NOT_STARTED") fail(prefix + " NOT_EXECUTED status requires NOT_STARTED environment");
       requireNullableEvidenceFields(item, prefix);
       if (item.verifierRole !== "NOT_ASSIGNED") fail(prefix + ".verifierRole must be NOT_ASSIGNED before execution");
     } else if (item.status === "BLOCKED") {
@@ -185,17 +194,8 @@ function validateManifest(manifest) {
       if (item.environment === "NOT_STARTED" && item.verifierRole !== "NOT_ASSIGNED") {
         fail(prefix + " without a selected environment must not claim an assigned verifier");
       }
-    } else if (item.status === "IN_PROGRESS") {
-      if (item.environment === "NOT_STARTED") fail(prefix + " IN_PROGRESS requires a selected environment");
-      if (item.independentReviewCompleted || item.review !== null) fail(prefix + " cannot claim completed review while IN_PROGRESS");
-      if (item.verifierRole === "NOT_ASSIGNED") fail(prefix + " IN_PROGRESS requires an assigned verifier");
-    } else if (item.status === "FAILED") {
-      if (item.environment === "NOT_STARTED") fail(prefix + " FAILED requires an identified execution environment");
-      if (!validDate(item.executedAt) || !SHA_RE.test(item.executionCommitSha || "") ||
-          !nonEmpty(item.observedOutcome) || !validEvidenceRef(item.evidenceRef)) {
-        fail(prefix + " FAILED requires timestamp, source SHA, observed outcome, and sanitized evidence reference");
-      }
-      if (item.independentReviewCompleted || item.review !== null) fail(prefix + " failed evidence cannot claim approved independent review");
+    } else if (item.status === "FAIL") {
+      validateExecutedCase(item, prefix, "failed");
     }
   }
   const missing = [...REQUIRED_IDS].filter(id => !seen.has(id));
@@ -207,7 +207,8 @@ function validateManifest(manifest) {
     evidenceAssessmentStatus: derived,
     gateStatus: "BLOCKED",
     requiredCaseCount: REQUIRED_IDS.size,
-    verifiedCaseCount: manifest.cases.filter(item => item.status === "VERIFIED").length
+    passedCaseCount: manifest.cases.filter(item => item.status === "PASS").length,
+    verifiedCaseCount: manifest.cases.filter(item => item.status === "PASS").length
   };
 }
 function main(argv) {

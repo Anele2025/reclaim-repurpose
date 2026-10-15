@@ -10,7 +10,7 @@ var ReclaimWhatsAppSheetsStore = (function () {
   var VERSION = 2;
   var DEFAULT_BATCH_LIMIT = 50;
   var HEADERS = {
-    Events: ["schemaVersion", "scopeKey", "eventId", "digest", "status", "claimToken", "claimedAt", "leaseExpiresAt", "attempts", "createdAt", "updatedAt", "completedAt", "resultJson", "lastErrorCode", "registrationId", "operationId", "registrationFingerprint"],
+    Events: ["schemaVersion", "scopeKey", "organizationId", "eventId", "digest", "status", "claimToken", "claimedAt", "leaseExpiresAt", "attempts", "createdAt", "updatedAt", "completedAt", "resultJson", "lastErrorCode", "registrationId", "operationId", "registrationFingerprint"],
     Sessions: ["schemaVersion", "scopeKey", "organizationId", "senderKey", "sessionJson", "updatedAt", "expiresAt"],
     Registrations: ["schemaVersion", "organizationId", "registrationId", "operationId", "payloadFingerprint", "payloadJson", "status", "createdAt", "updatedAt"],
     Audit: ["schemaVersion", "occurredAt", "kind", "organizationId", "recordKey", "outcome", "diagnosticCode"]
@@ -154,7 +154,7 @@ var ReclaimWhatsAppSheetsStore = (function () {
               return { status: "NEW", claimToken: token };
             }
             var claimToken = newClaimToken();
-            write("Events", 0, { schemaVersion: VERSION, scopeKey: scope(organizationId, accountScope),
+            write("Events", 0, { schemaVersion: VERSION, scopeKey: scope(organizationId, accountScope), organizationId: organizationId,
               eventId: eventId, digest: digest, status: "PROCESSING", claimToken: claimToken,
               claimedAt: stamp, leaseExpiresAt: stamp + leaseMs, attempts: 1, createdAt: stamp,
               updatedAt: stamp, completedAt: "", resultJson: "", lastErrorCode: "" });
@@ -170,7 +170,10 @@ var ReclaimWhatsAppSheetsStore = (function () {
             var record = eventRow(organizationId, eventId, accountScope);
             if (!record || record.digest !== digestValue) fail("EVENT_CLAIM_MISMATCH");
             if (record.status !== "PROCESSING" || !nonempty(claimToken, 256) || record.claimToken !== claimToken) fail("STALE_CLAIM_TOKEN");
-            if (!request || request.organizationId !== organizationId || !nonempty(request.registrationId, 180) || !nonempty(request.operationId, 180)) fail("REGISTRATION_LINK_INVALID");
+            if (!request || request.organizationId !== organizationId || !nonempty(request.registrationId, 180) || !nonempty(request.operationId, 180) ||
+                !nonempty(request.customerName, 120) || !nonempty(request.customerPhone, 80) ||
+                typeof request.latitude !== "number" || !isFinite(request.latitude) || request.latitude < -90 || request.latitude > 90 ||
+                typeof request.longitude !== "number" || !isFinite(request.longitude) || request.longitude < -180 || request.longitude > 180) fail("REGISTRATION_LINK_INVALID");
             var payload = { organizationId: request.organizationId, registrationId: request.registrationId, operationId: request.operationId,
               customerName: request.customerName, customerPhone: request.customerPhone, locationDescription: request.locationDescription || "",
               latitude: request.latitude, longitude: request.longitude };
@@ -367,12 +370,31 @@ var ReclaimWhatsAppSheetsStore = (function () {
         }).slice(0, limit);
         candidates.forEach(function (record) {
           inspected++;
-          // Expiry is not proof the prior execution stopped. Quarantine the claim;
-          // never automatically replay an event whose side effects are uncertain.
+          // A linked registration can be reconciled only when exactly one durable row
+          // matches both stable identifiers and the canonical payload fingerprint.
+          var linkedRows = record.organizationId && record.registrationId && record.operationId && record.registrationFingerprint ?
+            rows("Registrations").filter(function (registration) {
+              return registration.organizationId === record.organizationId &&
+                registration.registrationId === record.registrationId && registration.operationId === record.operationId;
+            }) : [];
+          if (linkedRows.length === 1 && linkedRows[0].status === "SUCCEEDED" &&
+              linkedRows[0].payloadFingerprint === record.registrationFingerprint) {
+            record.status = "COMPLETE"; record.claimToken = ""; record.leaseExpiresAt = "";
+            record.updatedAt = stamp; record.completedAt = stamp;
+            record.resultJson = JSON.stringify({ ok: true, code: "REGISTERED",
+              message: "Your waste-collection registration was saved. This is not a collection booking; the company may contact you about next steps.",
+              registrationId: record.registrationId });
+            record.lastErrorCode = "";
+            write("Events", record._row, record);
+            audit("RECONCILIATION", record.organizationId, record.eventId, "RECOVERED", "LINKED_REGISTRATION_CONFIRMED");
+            continue;
+          }
+          // Expiry alone is not proof that the old execution stopped. Ambiguous,
+          // absent, or contradictory registration rows are quarantined for review.
           record.status = "RECONCILIATION_REQUIRED"; record.claimToken = ""; record.leaseExpiresAt = "";
-          record.updatedAt = stamp; record.lastErrorCode = "LEASE_EXPIRED_REVIEW_REQUIRED";
+          record.updatedAt = stamp; record.lastErrorCode = linkedRows.length ? "REGISTRATION_LINK_CONTRADICTORY" : "LEASE_EXPIRED_REVIEW_REQUIRED";
           write("Events", record._row, record);
-          audit("RECONCILIATION", "", record.eventId, "MANUAL_REVIEW", "LEASE_EXPIRED_REVIEW_REQUIRED");
+          audit("RECONCILIATION", record.organizationId || "", record.eventId, "MANUAL_REVIEW", record.lastErrorCode);
           quarantined++;
           review++;
         });

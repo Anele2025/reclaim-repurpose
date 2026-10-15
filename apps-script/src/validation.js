@@ -106,7 +106,7 @@ var ReclaimValidation = (function () {
     var candidate = error && error.error && error.error.code;
     var code = allowed[candidate] ? candidate : "VALIDATION_FAILED";
     var field = error && error.error && typeof error.error.field === "string" ? error.error.field : "request";
-    var reason = error && error.error && typeof error.error.reason === "string" ? error.error.reason : "Request could not be validated.";
+    var reason = code === "VALIDATION_FAILED" ? "Request could not be validated." : "Validation failed; review the indicated field and allowed values.";
     return { ok: false, error: { code: code, field: field, reason: reason } };
   }
 

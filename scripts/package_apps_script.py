@@ -80,9 +80,10 @@ def load_manifest() -> dict:
 def build(output: Path) -> Path:
     output = output.resolve()
     root = ROOT.resolve()
-    if output == root or root not in output.parents:
-        fail("output must be a child of this repository")
-    if output == SOURCE_DIR.resolve() or SOURCE_DIR.resolve() in output.parents:
+    dist_root = (root / "dist").resolve()
+    if (root / "dist").is_symlink() or dist_root not in output.parents:
+        fail("output must be a child directory beneath the repository dist/ directory")
+    if SOURCE_DIR.resolve() in output.parents or output == SOURCE_DIR.resolve():
         fail("output cannot be inside the source directory")
     manifest = load_manifest()
 

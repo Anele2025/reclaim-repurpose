@@ -1,0 +1,3 @@
+RevenueID,RecordStatus,CountryCode,PilotID,SiteID,RevenueStream,CounterpartyRef,MaterialType,Quantity,Unit,UnitPrice,CurrencyCode,GrossAmount,ExpectedActualStatus,InvoiceOrAgreementRef,PaymentStatus,ExpectedPaymentDate,ActualPaymentDate,EvidenceRef,Notes
+TEST-REV-001,TEST_DATA,BW,TEST-PILOT-BW,TEST-SITE-BW,PROPOSED_SERVICE_FEE,TEST-CUSTOMER-BW,,1,site-month,500,BWP,"=IF(OR(I2="""",K2=""""),"""",I2*K2)",PROPOSED,TEST-ONLY,NOT_RECEIVED,,,TEST-ONLY,Fictional proposal; not contracted or cash received.
+TEST-REV-002,TEST_DATA,SZ,TEST-PILOT-SZ,TEST-SITE-SZ,EXPECTED_MATERIAL_SALE,TEST-BUYER-SZ,Aluminium cans,10,kg,0,SZL,"=IF(OR(I3="""",K3=""""),"""",I3*K3)",EXPECTED,TEST-ONLY,NOT_RECEIVED,,,TEST-ONLY,Zero placeholder; no buyer or price is verified.

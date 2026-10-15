@@ -35,7 +35,7 @@
 - Idempotency holds the ScriptLock across the bounded operation, replays recorded successful results, rejects conflicting operation reuse, and marks uncertain outcomes for reconciliation rather than blind replay.
 - The repository validates allow-listed sheets and exact configured headers, rejects unexpected columns and duplicate stable IDs, preserves basic value types, escapes formula-leading strings including whitespace-prefixed markers, and supports constrained updates.
 - The Idempotency sheet schema now has 11 columns: operationId, actorId, organizationId, operationType, payloadDigest, status, resultRef, createdAt, updatedAt, resultJson, correlationId.
-- Service-level synthetic tests cover spoofed claims, cross-organization owner access, inactive/ambiguous membership, platform-admin lookup, successful mutation, idempotent replay, conflicting payload, pre-write and post-write audit failure, lock failure, unresolved processing records, formula escaping, schema mismatch, duplicate IDs, and typed writes.
+- Service-level synthetic tests cover spoofed claims, cross-organization owner access, inactive/ambiguous membership, unknown role, suspended organization, platform-admin lookup, successful mutation, idempotent replay, conflicting payload, pre-write and post-write audit failure, lock failure, unresolved processing records, deterministic lock contention, formula escaping, schema mismatch, duplicate IDs, country/currency mismatch, and typed writes.
 - Setup documentation and the README roadmap were updated. CI was configured to run on the Stage 5.3 branch.
 
 ## Known limits and risks
@@ -47,8 +47,8 @@
 - The representative mutation covers only serviceEnabled; broad organization/membership CRUD and operational-record workflows remain out of scope.
 - The Idempotency sheet header has changed. No live sheet is verified; do not apply a silent migration to any real workbook.
 - Google Sheets direct-access permissions, AppSheet security filters, WhatsApp integration, production monitoring, quota behavior, backup/restore, and deployment security remain unverified.
-- GitHub Actions run 38734912114 completed successfully for head SHA f74c07014278e001c8b5c7707cb31564e26271ea. Its Node.js 22 Apps Script-compatible test step and Stage 4 structural/link validator both completed successfully. A later audit-document-only commit was then pushed; no application source or tests changed after this verified code snapshot. This verifies automated repository checks only; code review and live Google integration remain pending.
+- GitHub Actions run 38735126381 completed successfully for head SHA 3cb6390cfd6650c6b5746bafe15216eec65179fe. Its Node.js 22 Apps Script-compatible test step and Stage 4 structural/link validator both completed successfully. This was the last application-source/test change; subsequent commits update documentation only. This verifies automated repository checks only; code review and live Google integration remain pending.
 
 ## Acceptance status at audit authoring
 
-**Automated CI passed; overall acceptance remains partial.** The current reported head passed the configured Node.js test suite and Stage 4 validator. Live Google identity, permissions, locking, AppSheet isolation, source packaging, and deployment security remain unverified. No production deployment is authorized by this report.
+**Automated CI passed; overall acceptance remains partial.** The recorded source/test head passed the configured Node.js test suite and Stage 4 validator. Live Google identity, permissions, locking, AppSheet isolation, source packaging, and deployment security remain unverified. No production deployment is authorized by this report.

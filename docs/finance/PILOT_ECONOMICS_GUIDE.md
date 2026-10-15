@@ -63,5 +63,20 @@ The scenario model calculates collected, contamination-adjusted sorted, accepted
 - If any critical cost, permission, safe destination, buyer acceptance condition, or funding source is unknown, treat the decision as unresolved rather than assuming the missing value is zero.
 - Optimistic results are not proof of viability. Test lower volumes, higher transport/labour, greater rejection, lower buyer prices, delayed/non-payment and zero material-sale revenue before proceeding.
 
+## Template validation rules
+
+### Cost tracker
+- `CostID` must be unique and immutable; `CountryCode` must be `BW` with `BWP`, or `SZ` with `SZL`.
+- `CostBehaviour`: `FIXED` or `VARIABLE`. `CostTiming`: `ONE_TIME` or `RECURRING`. `PlanActualStatus`: `PLANNED` or `ACTUAL`. `PaymentStatus`: `PENDING`, `PAID`, `PARTIALLY_PAID`, `OVERDUE`, or `CANCELLED`.
+- Quantity and unit price must be non-negative numbers in the same currency/unit basis. TotalCost is `Quantity × UnitPrice`; the CSV includes an Excel/Google Sheets formula in the sample rows. Blank quantity or price returns blank, not zero.
+- Actual cost rows require a transaction date and an evidence reference (or an explicit reason evidence is unavailable). Reconcile actual costs against the Stage 1 finance ledger; do not count the same cost twice.
+
+### Revenue tracker
+- `RevenueID` must be unique. Country/currency pairing must follow the same rule as the cost tracker.
+- Use distinct `RevenueStream` values such as `CONTRACTED_SERVICE_FEE`, `PROPOSED_SERVICE_FEE`, `CONFIRMED_SPONSORSHIP`, `PROPOSED_SPONSORSHIP`, `CONFIRMED_GRANT`, `PROPOSED_GRANT`, `EXPECTED_MATERIAL_SALE`, and `ACTUAL_MATERIAL_SALE`.
+- `ExpectedActualStatus`: `PROPOSED`, `EXPECTED`, `CONTRACTED`, or `ACTUAL`. `PaymentStatus`: `NOT_RECEIVED`, `PENDING`, `PARTIALLY_PAID`, `PAID`, `OVERDUE`, or `CANCELLED`.
+- GrossAmount is `Quantity × UnitPrice`. Blank quantity or price returns blank, not zero. Only evidence-backed receipts marked paid and reconciled to actual payment evidence may be reported as cash received.
+- For material sales, quantity must match the amount the buyer will actually accept/purchase under the documented terms; collected quantity alone is not saleable quantity.
+
 ## Country and currency separation
 Botswana uses `BW` / `BWP`; Eswatini uses `SZ` / `SZL`. Keep wages, transport, material prices, taxes and compliance assumptions country-specific. Do not combine currency amounts. If an exchange-rate comparison is later needed, document the rate, source, date, conversion direction and formula in a separate comparison layer.

@@ -69,7 +69,7 @@ function fixture(options = {}) {
     lockService: { getScriptLock: () => lock },
     now: () => clock,
     digest: value => "sha256:" + value,
-    idGenerator: prefix => prefix + "-" + (++id),
+    idGenerator: options.idGenerator || (prefix => prefix + "-" + (++id)),
     lockTimeoutMs: 50,
     claimLeaseMs: 100,
     batchLimit: 3
@@ -293,4 +293,58 @@ test("reconciliation quarantines linked claims when the registration row is abse
   assert.equal(result.quarantinedExpiredClaims, 1);
   assert.equal(events.begin("recover-missing", "digest-m", "ORG_A").code, "RECONCILIATION_REQUIRED");
   assert.throws(() => events.release("recover-missing", "digest-m", "ORG_A", claim.claimToken, "STALE"), /STALE_CLAIM_TOKEN/);
+});
+
+
+test("claim generations fence stale workers even when the injected token source collides", () => {
+  const f = fixture({ idGenerator: () => "constant-token" });
+  const events = f.api.eventStore("ACCOUNT_A");
+  const first = events.begin("collision-event", "digest", "ORG_A");
+  events.release("collision-event", "digest", "ORG_A", first.claimToken, "RETRY");
+  const second = events.begin("collision-event", "digest", "ORG_A");
+  assert.notEqual(second.claimToken, first.claimToken);
+  assert.throws(() => events.complete("collision-event", "digest", "ORG_A", first.claimToken, { ok: true }), /STALE_CLAIM_TOKEN/);
+  assert.equal(events.complete("collision-event", "digest", "ORG_A", second.claimToken, { ok: true }).ok, true);
+});
+
+test("event completion refuses a non-success result", () => {
+  const f = fixture();
+  const events = f.api.eventStore("ACCOUNT_A");
+  const claim = events.begin("false-result", "digest", "ORG_A");
+  assert.throws(() => events.complete("false-result", "digest", "ORG_A", claim.claimToken, { ok: false }), /EVENT_RESULT_INVALID/);
+  assert.equal(events.begin("false-result", "digest", "ORG_A").status, "IN_PROGRESS");
+});
+
+test("registration IDs and operation IDs cannot be reused across tenants", () => {
+  const f = fixture();
+  const store = f.api.registrationStore();
+  const original = { organizationId: "ORG_A", registrationId: "global-reg", operationId: "global-op",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", latitude: 0, longitude: 0 };
+  assert.equal(store.create(original).ok, true);
+  const reusedRegistration = store.create({ ...original, organizationId: "ORG_B", operationId: "other-op" });
+  assert.equal(reusedRegistration.ok, false);
+  assert.equal(reusedRegistration.code, "IDEMPOTENCY_CONFLICT");
+  const reusedOperation = store.create({ ...original, organizationId: "ORG_B", registrationId: "other-reg" });
+  assert.equal(reusedOperation.ok, false);
+  assert.equal(reusedOperation.code, "IDEMPOTENCY_CONFLICT");
+  assert.equal(f.spreadsheet.getSheetByName("Registrations").getLastRow(), 2);
+});
+
+test("reconciliation treats cross-tenant identifier collisions as contradictory evidence", () => {
+  const f = fixture();
+  const eventsA = f.api.eventStore("ACCOUNT_A");
+  const claim = eventsA.begin("cross-tenant-recovery", "digest", "ORG_A");
+  const request = { organizationId: "ORG_A", registrationId: "shared-reg", operationId: "shared-op",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", locationDescription: "",
+    latitude: 0, longitude: 0 };
+  eventsA.linkRegistration("cross-tenant-recovery", "digest", "ORG_A", claim.claimToken, request);
+  const otherTenant = { ...request, organizationId: "ORG_B" };
+  // Create a conflicting row under another tenant by seeding the fake sheet,
+  // representing a writer that bypassed this adapter's cooperative lock.
+  const tab = f.spreadsheet.getSheetByName("Registrations");
+  tab.appendRow([2, "ORG_B", "shared-reg", "shared-op", "different-fingerprint", JSON.stringify(otherTenant), "SUCCEEDED", 1, 1]);
+  f.advance(101);
+  const result = f.api.reconcile({ limit: 1 });
+  assert.equal(result.quarantinedExpiredClaims, 1);
+  assert.equal(eventsA.begin("cross-tenant-recovery", "digest", "ORG_A").code, "RECONCILIATION_REQUIRED");
 });

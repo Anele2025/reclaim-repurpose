@@ -148,3 +148,9 @@ Do not begin Stage 5.6 AppSheet dashboard implementation until:
 - the final CI run passes for the exact PR head SHA.
 
 If live Google resources remain unavailable, keep the gate blocked and continue only safe repository-level verification.
+
+## 10. Repository CI evidence snapshot
+
+At the first Stage 5.5 verification run, GitHub confirmed PR #9 head SHA `379f11ca198371eef18227377f9b8e62b178e61c`. Workflow run [38738058413](https://github.com/Anele2025/reclaim-repurpose/actions/runs/38738058413) completed successfully for that exact SHA. The `pure-validation` job completed the Apps Script-compatible Node test suite (including this stage's adversarial test file), Python package tests, deterministic package build, generated-package syntax/content checks, and Stage 4 validator.
+
+This snapshot is historical evidence for the SHA shown above. After any subsequent commit, re-check the PR head and workflow run; only a successful run whose `head_sha` exactly matches the final PR head is valid final-CI evidence. The live Google gate remains **BLOCKED / NOT VERIFIED** irrespective of this CI result.

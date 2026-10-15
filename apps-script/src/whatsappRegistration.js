@@ -36,9 +36,12 @@ var ReclaimWhatsAppRegistration = (function () {
         typeof deps.parseWebhook === "function" &&
         typeof deps.resolveOrganization === "function" &&
         typeof deps.digestEvent === "function" &&
-        deps.eventStore && typeof deps.eventStore.claim === "function" &&
+        deps.eventStore && typeof deps.eventStore.begin === "function" &&
+        typeof deps.eventStore.complete === "function" &&
+        typeof deps.eventStore.release === "function" &&
         deps.sessionStore && typeof deps.sessionStore.get === "function" &&
         typeof deps.sessionStore.put === "function" &&
+        typeof deps.sessionStore.withSenderLock === "function" &&
         typeof deps.createRegistration === "function" &&
         typeof deps.now === "function" && typeof deps.idGenerator === "function";
     }
@@ -48,12 +51,18 @@ var ReclaimWhatsAppRegistration = (function () {
       return result;
     }
     function nextMessage(event, session, organizationId, nowMs) {
+      // Persist the event marker with each state transition. If the event store
+      // completion fails after a session write, a retry can detect the transition.
+      function persistSession(value) {
+        value.lastProcessedEventId = event.eventId;
+        deps.sessionStore.put(organizationId, event.senderId, value);
+      }
       var incoming = event.type === "text" ? text(event.text, MAX_TEXT) : "";
       if (session && session.expiresAt && nowMs > session.expiresAt) session = null;
       if (!session) {
         session = { step: "NAME", createdAt: nowMs, updatedAt: nowMs,
           expiresAt: nowMs + SESSION_TTL_MS, customerPhone: event.senderId };
-        deps.sessionStore.put(organizationId, event.senderId, session);
+        persistSession(session);
         return response(true, "CONTINUE", "Welcome to waste-collection registration. What is your full name?");
       }
       session.updatedAt = nowMs;
@@ -153,23 +162,52 @@ var ReclaimWhatsAppRegistration = (function () {
         try { digest = text(deps.digestEvent(event), 256); } catch (_) { digest = ""; }
         if (!digest) return failure("EVENT_INTEGRITY_UNAVAILABLE", "Message could not be safely processed.");
         var claim;
-        try { claim = deps.eventStore.claim(event.eventId, digest, organizationId); } catch (_) { claim = null; }
-        if (!claim || !["NEW", "REPLAY", "CONFLICT"].includes(claim.status)) {
+        try { claim = deps.eventStore.begin(event.eventId, digest, organizationId); } catch (_) { claim = null; }
+        if (!claim || !["NEW", "REPLAY", "CONFLICT", "IN_PROGRESS"].includes(claim.status)) {
           return failure("EVENT_STORE_UNAVAILABLE", "Message could not be safely processed; retry later.");
         }
         if (claim.status === "CONFLICT") return failure("EVENT_ID_CONFLICT", "Conflicting duplicate event was rejected.");
         if (claim.status === "REPLAY") {
-          results.push(response(true, "DUPLICATE_IGNORED", "Duplicate message ignored."));
+          results.push(claim.result || response(true, "DUPLICATE_IGNORED", "Duplicate message ignored."));
+          continue;
+        }
+        if (claim.status === "IN_PROGRESS") {
+          results.push(response(false, "EVENT_IN_PROGRESS", "This message is still being processed; retry shortly."));
           continue;
         }
         var nowValue;
         try { nowValue = deps.now(); } catch (_) { nowValue = null; }
         var nowMs = typeof nowValue === "number" ? nowValue : Date.parse(nowValue);
-        if (!isFinite(nowMs)) return failure("CLOCK_UNAVAILABLE", "Message could not be safely processed.");
-        var session;
-        try { session = deps.sessionStore.get(organizationId, event.senderId); } catch (_) { return failure("SESSION_STORE_UNAVAILABLE", "Registration session is temporarily unavailable."); }
+        if (!isFinite(nowMs)) {
+          try { deps.eventStore.release(event.eventId, digest, organizationId); } catch (_) {}
+          return failure("CLOCK_UNAVAILABLE", "Message could not be safely processed.");
+        }
         var result;
-        try { result = nextMessage(event, session, organizationId, nowMs); } catch (_) { return failure("SESSION_STORE_UNAVAILABLE", "Registration session is temporarily unavailable."); }
+        try {
+          result = deps.sessionStore.withSenderLock(organizationId, event.senderId, function () {
+            var session = deps.sessionStore.get(organizationId, event.senderId);
+            if (session && session.lastProcessedEventId === event.eventId) {
+              return response(true, "RECOVERED_TRANSITION", "Your last message was processed. Please send your next response if needed.");
+            }
+            return nextMessage(event, session, organizationId, nowMs);
+          });
+          if (!result || typeof result.ok !== "boolean") throw new Error("INVALID_WORKFLOW_RESULT");
+        } catch (_) {
+          try { deps.eventStore.release(event.eventId, digest, organizationId); } catch (_) {}
+          return failure("SESSION_STORE_UNAVAILABLE", "Registration session is temporarily unavailable; retry later.");
+        }
+        if (result.ok === false) {
+          try { deps.eventStore.release(event.eventId, digest, organizationId); } catch (_) {}
+          results.push(result);
+          continue;
+        }
+        try {
+          deps.eventStore.complete(event.eventId, digest, organizationId, result);
+        } catch (_) {
+          // Do not report success while completion is uncertain. The persisted
+          // session marker makes a retry safe after a successful state transition.
+          return failure("EVENT_STORE_UNAVAILABLE", "Message outcome could not be confirmed; retry later.");
+        }
         results.push(result);
       }
       return { ok: true, code: "PROCESSED", results: results };

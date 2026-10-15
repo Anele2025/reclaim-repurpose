@@ -26,12 +26,20 @@ var ReclaimWhatsAppSheetsStore = (function () {
       return JSON.stringify(key) + ":" + canonical(value[key]);
     }).join(",") + "}";
   }
+  function defaultDigest(value) {
+    if (typeof Utilities === "undefined" || !Utilities.computeDigest || !Utilities.DigestAlgorithm || !Utilities.Charset) {
+      fail("DIGEST_UNAVAILABLE");
+    }
+    var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(value), Utilities.Charset.UTF_8);
+    return bytes.map(function (byte) { return ((byte + 256) % 256).toString(16).padStart(2, "0"); }).join("");
+  }
   function create(deps) {
     if (!deps || !deps.spreadsheet || typeof deps.spreadsheet.getSheetByName !== "function" ||
         !deps.lockService || typeof deps.lockService.getScriptLock !== "function" ||
-        typeof deps.now !== "function" || typeof deps.digest !== "function") {
+        typeof deps.now !== "function") {
       fail("STORE_CONFIGURATION_INVALID");
     }
+    var digest = typeof deps.digest === "function" ? deps.digest : defaultDigest;
     var timeoutMs = Number(deps.lockTimeoutMs || 5000);
     var leaseMs = Number(deps.claimLeaseMs || 120000);
     var batchLimit = Number(deps.batchLimit || DEFAULT_BATCH_LIMIT);
@@ -257,7 +265,7 @@ var ReclaimWhatsAppSheetsStore = (function () {
           operationId: request.operationId, customerName: request.customerName,
           customerPhone: request.customerPhone, locationDescription: request.locationDescription || "",
           latitude: request.latitude, longitude: request.longitude };
-        return String(deps.digest(canonical(payload)));
+        return String(digest(canonical(payload)));
       }
       return {
         create: function (request) {
@@ -323,7 +331,7 @@ var ReclaimWhatsAppSheetsStore = (function () {
       var limit = Number(options.limit || batchLimit);
       if (!(limit > 0 && limit <= batchLimit)) fail("RECONCILIATION_LIMIT_INVALID");
       return withLock(function () {
-        var stamp = nowMs(), inspected = 0, released = 0, review = 0;
+        var stamp = nowMs(), inspected = 0, quarantined = 0, review = 0;
         var candidates = rows("Events").filter(function (record) {
           return record.status === "PROCESSING" && Number(record.leaseExpiresAt) > 0 && Number(record.leaseExpiresAt) <= stamp;
         }).slice(0, limit);
@@ -335,6 +343,7 @@ var ReclaimWhatsAppSheetsStore = (function () {
           record.updatedAt = stamp; record.lastErrorCode = "LEASE_EXPIRED_REVIEW_REQUIRED";
           write("Events", record._row, record);
           audit("RECONCILIATION", "", record.eventId, "MANUAL_REVIEW", "LEASE_EXPIRED_REVIEW_REQUIRED");
+          quarantined++;
           review++;
         });
         var duplicateOps = {};
@@ -350,7 +359,7 @@ var ReclaimWhatsAppSheetsStore = (function () {
             audit("RECONCILIATION", "", key, "MANUAL_REVIEW", "DUPLICATE_OPERATION_ROWS");
           }
         });
-        return { ok: true, inspected: inspected, releasedExpiredClaims: released, manualReview: review, limit: limit };
+        return { ok: true, inspected: inspected, quarantinedExpiredClaims: quarantined, manualReview: review, limit: limit };
       });
     }
     return Object.freeze({ initialize: initialize, eventStore: eventStore,

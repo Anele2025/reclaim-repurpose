@@ -243,7 +243,7 @@ var ReclaimService = (function () {
           collectedAt: value.collectedAt, materialCategory: value.materialCategory, quantity: value.quantity,
           unit: value.unit, collectorRef: value.collectorRef, destinationPartnerId: value.destinationPartnerId,
           handoverRef: value.handoverRef, evidenceRef: value.evidenceRef,
-          status: value.handoverRef && value.destinationPartnerId ? "HANDED_OVER" : "RECORDED",
+          status: "RECORDED",
           createdAt: timestamp, updatedAt: timestamp, createdBy: refreshed.actorId, operationId: value.operationId
         };
         try { deps.repository.appendCollectionRecord(record); } catch (_) { throw new Error("WRITE_OUTCOME_UNCERTAIN"); }

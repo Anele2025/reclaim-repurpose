@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import package_apps_script as packager
+from scripts import package_apps_script as packager
 
 
 class PackageAppsScriptTests(unittest.TestCase):

@@ -5,7 +5,7 @@
 
 RECLAIM & REPURPOSE is being developed as a Southern African circular-economy initiative focused on helping communities and organizations recover useful materials, reduce avoidable waste, and measure environmental and economic outcomes. Initial target countries are **Botswana and Eswatini**.
 
-> **Current status (Stage 5.1):** Google-first digital-tracker specification and implementation preparation. Repository documentation and validation source are not a deployed application. Google Sheets, Apps Script, AppSheet, WhatsApp provider integration, and production APIs are not claimed to be configured or live.
+> **Current status (Stage 5.3 review branch):** backend authorization, audit enforcement, and recoverable mutation processing are under implementation review. This branch is not merged or deployed. Google Sheets, Apps Script, AppSheet, WhatsApp provider integration, and production APIs are not claimed to be live.
 
 ## Purpose
 
@@ -61,7 +61,9 @@ All included sample rows are fictional test data. CSV templates do not enforce a
 - [x] **Stage 3 — Pilot workflow, safety and traceability:** draft procedures/checklists exist; they do not authorize operations.
 - [x] **Stage 4 — Customer, partner, site-permission and evidence validation:** research plans and registers exist; they are not evidence that validation is complete.
 - [x] **Stage 5 specification — Google-first digital tracker:** specification exists on the Stage 5 branch; no live Google resources or provider integration are implied.
-- [ ] **Stage 5.1 — Architecture baseline and implementation preparation:** correct status/documentation, add independently testable validation logic and reproducible local tests; review in PR before merge.
+- [ ] **Stage 5.1 — Architecture baseline and implementation preparation:** implementation and validation changes are in unmerged PR #5.
+- [ ] **Stage 5.2 — Authenticated Apps Script backend foundation:** backend adapter foundation is in unmerged PR #6; live Google identity and storage behavior remain unverified.
+- [ ] **Stage 5.3 — Secure service and recovery:** authorization, audit and idempotent mutation remediation is in an unmerged review branch; CI and final review evidence pending.
 - [ ] **Next — Authenticated Apps Script execution and server-side membership lookup:** configure an authorized Google project, implement server-side identity/membership checks and protected Sheets access, and verify with synthetic negative tests.
 - [ ] **Following — AppSheet dashboards:** configure the administrator dashboard and separately restricted organization-owner dashboards after server/data-source security is verified.
 - [ ] **Following — WhatsApp integration:** select and verify a provider, then implement signed webhook validation, replay protection, retries and failure monitoring.

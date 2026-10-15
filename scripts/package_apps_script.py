@@ -31,6 +31,11 @@ MODULE_ORDER = (
 REQUIRED_ENTRYPOINTS = (
     "reclaimGetMyOrganizationSummary",
     "reclaimSetOrganizationServiceEnabled",
+    "reclaimCreateCollectionSite",
+    "reclaimGetCollectionSite",
+    "reclaimListCollectionSites",
+    "reclaimUpdateCollectionSite",
+    "reclaimDeactivateCollectionSite",
     "reclaimRecordCollection",
     "reclaimGetCollectionRecord",
     "reclaimListCollectionRecords",

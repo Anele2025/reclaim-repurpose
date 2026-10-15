@@ -1,34 +1,72 @@
-/** Durable idempotency adapter. Caller must hold a ScriptLock around reserve + mutation. */
+/** Recoverable idempotency orchestration. Mutations run while the shared script lock is held. */
 var ReclaimIdempotency = (function () {
   "use strict";
-  function reserve(repository, lockService, input, now) {
-    if (!input || !input.operationId || !input.actorId || !input.organizationId || !input.operationType || !input.payloadDigest) {
-      return { ok: false, error: { code: "INVALID_IDEMPOTENCY_REQUEST", message: "Required operation metadata is missing." } };
+  var STATES = Object.freeze(["PROCESSING", "SUCCEEDED", "FAILED_RETRYABLE", "RECONCILIATION_REQUIRED"]);
+  function fail(code, message) { return { ok: false, error: { code: code, message: message } }; }
+  function execute(repository, lockService, input, now, mutation) {
+    if (!input || !input.operationId || !input.actorId || !input.organizationId ||
+        !input.operationType || !input.payloadDigest || !input.correlationId ||
+        typeof mutation !== "function") {
+      return fail("INVALID_IDEMPOTENCY_REQUEST", "Required operation metadata is missing.");
     }
-    var lock = lockService.getScriptLock();
-    if (!lock.tryLock(10000)) return { ok: false, error: { code: "LOCK_UNAVAILABLE", message: "Operation could not be safely reserved; retry later." } };
+    var lock;
+    try { lock = lockService.getScriptLock(); }
+    catch (_) { return fail("LOCK_UNAVAILABLE", "Operation could not be safely reserved; retry later."); }
+    var acquired = false;
+    try { acquired = lock.tryLock(10000); } catch (_) { acquired = false; }
+    if (!acquired) return fail("LOCK_UNAVAILABLE", "Operation could not be safely reserved; retry later.");
+    var reserved = false;
     try {
-      var existing = repository.findOperation(input.operationId);
-      if (existing) {
-        var same = String(existing.actorId) === input.actorId &&
-          String(existing.organizationId) === input.organizationId &&
-          String(existing.operationType) === input.operationType &&
-          String(existing.payloadDigest) === input.payloadDigest;
-        return same
-          ? { ok: false, error: { code: "OPERATION_ALREADY_EXISTS", message: "Operation already exists; reconcile its recorded status before retrying." }, existingStatus: existing.status }
-          : { ok: false, error: { code: "IDEMPOTENCY_CONFLICT", message: "Operation ID was previously used for different operation data." } };
+      var operation = repository.findOperation(input.operationId);
+      if (operation) {
+        var same = String(operation.actorId) === input.actorId &&
+          String(operation.organizationId) === input.organizationId &&
+          String(operation.operationType) === input.operationType &&
+          String(operation.payloadDigest) === input.payloadDigest;
+        if (!same) return fail("IDEMPOTENCY_CONFLICT", "Operation ID was previously used for different operation data.");
+        if (operation.status === "SUCCEEDED") {
+          try { return { ok: true, replayed: true, value: JSON.parse(String(operation.resultJson || "null")), correlationId: input.correlationId }; }
+          catch (_) { return fail("RECONCILIATION_REQUIRED", "Stored operation result is unreadable; do not repeat the mutation."); }
+        }
+        if (STATES.indexOf(String(operation.status)) < 0 || operation.status === "PROCESSING" ||
+            operation.status === "RECONCILIATION_REQUIRED") {
+          return fail("RECONCILIATION_REQUIRED", "Operation outcome is not safely replayable; reconcile its recorded status first.");
+        }
+        return fail("RETRY_REQUIRES_NEW_OPERATION", "A failed operation is not replayed. Confirm it had no side effects before creating a new operation ID.");
       }
       repository.appendIdempotency({
         operationId: input.operationId, actorId: input.actorId, organizationId: input.organizationId,
-        operationType: input.operationType, payloadDigest: input.payloadDigest, status: "PROCESSING",
-        resultRef: "", createdAt: now, updatedAt: now
+        operationType: input.operationType, payloadDigest: input.payloadDigest,
+        status: "PROCESSING", resultRef: "", resultJson: "", correlationId: input.correlationId,
+        createdAt: now, updatedAt: now
       });
-      return { ok: true, status: "PROCESSING" };
+      reserved = true;
+      var result = mutation();
+      if (!result || result.ok !== true) {
+        var failedState = repository.updateOperation(input.operationId, {
+          status: "FAILED_RETRYABLE", resultRef: "", resultJson: "", updatedAt: now
+        });
+        if (!failedState) throw new Error("OPERATION_STATE_NOT_PERSISTED");
+        return result || fail("MUTATION_FAILED", "Operation did not complete.");
+      }
+      var completedState = repository.updateOperation(input.operationId, {
+        status: "SUCCEEDED", resultRef: String(result.recordRef || ""),
+        resultJson: JSON.stringify(result.value === undefined ? null : result.value), updatedAt: now
+      });
+      if (!completedState) throw new Error("OPERATION_STATE_NOT_PERSISTED");
+      return { ok: true, replayed: false, value: result.value, correlationId: input.correlationId };
     } catch (_) {
-      return { ok: false, error: { code: "IDEMPOTENCY_STORE_UNAVAILABLE", message: "Operation could not be safely reserved." } };
+      if (reserved) {
+        try {
+          repository.updateOperation(input.operationId, {
+            status: "RECONCILIATION_REQUIRED", resultRef: "", resultJson: "", updatedAt: now
+          });
+        } catch (__) { /* A PROCESSING row is intentionally a fail-closed recovery signal. */ }
+      }
+      return fail("RECONCILIATION_REQUIRED", "The operation outcome is uncertain; do not retry until the recorded state is reconciled.");
     } finally {
-      lock.releaseLock();
+      try { lock.releaseLock(); } catch (_) { /* No further action is safe if release fails. */ }
     }
   }
-  return Object.freeze({ reserve: reserve });
+  return Object.freeze({ execute: execute, states: STATES });
 }());

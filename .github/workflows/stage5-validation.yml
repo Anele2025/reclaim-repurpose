@@ -12,6 +12,7 @@ on:
     branches:
       - stage-5-working-mvp
       - stage-5-2-authenticated-sheets-backend
+      - stage-5-3-secure-recoverable-service
 
 jobs:
   pure-validation:

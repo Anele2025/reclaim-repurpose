@@ -30,11 +30,11 @@ var ReclaimService = (function () {
         return m.role === "COMPANY_OWNER" && String(m.organizationId) === String(organizationId);
       });
       if (candidates.length > 1) return { ok: false, error: { code: "MEMBERSHIP_AMBIGUOUS", message: "Access could not be verified." } };
-      if (!candidates.length) return { ok: false, error: { code: "MEMBERSHIP_NOT_FOUND", message: "Required active membership was not found." } };
+      if (!candidates.length) return { ok: false, error: { code: "MEMBERSHIP_NOT_FOUND", message: "Required membership was not found." } };
       if (candidates[0].status !== "ACTIVE") return { ok: false, error: { code: "MEMBERSHIP_INACTIVE", message: "Membership is not active." } };
       return { ok: true, membership: candidates[0] };
     }
-    function organizationFor(organizationId, allowProspect) {
+    function organizationFor(organizationId, allowProspect, requiredRole) {
       if (typeof organizationId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/.test(organizationId)) {
         return { ok: false, error: { code: "INVALID_ORGANIZATION_ID", message: "A valid organization ID is required." } };
       }
@@ -42,18 +42,27 @@ var ReclaimService = (function () {
       try { organization = deps.repository.findOrganization(organizationId); }
       catch (_) { return { ok: false, error: { code: "STORAGE_UNAVAILABLE", message: "The request could not be completed." } }; }
       if (!organization) return { ok: false, error: { code: "ORGANIZATION_NOT_FOUND", message: "Organization could not be verified." } };
-      if (["ACTIVE", "PROSPECT"].indexOf(String(organization.status)) < 0) {
-        return { ok: false, error: { code: "ORGANIZATION_INACTIVE", message: "Organization is not available for this action." } };
+      if (requiredRole === "PLATFORM_ADMIN") {
+        if (["ACTIVE", "PROSPECT", "PAUSED", "SUSPENDED"].indexOf(String(organization.status)) < 0) {
+          return { ok: false, error: { code: "ORGANIZATION_INACTIVE", message: "Archived or unknown organizations cannot be changed." } };
+        }
+      } else {
+        if (["ACTIVE", "PROSPECT"].indexOf(String(organization.status)) < 0) {
+          return { ok: false, error: { code: "ORGANIZATION_INACTIVE", message: "Organization is not available for this action." } };
+        }
+        if (!allowProspect && organization.status !== "ACTIVE") {
+          return { ok: false, error: { code: "ORGANIZATION_NOT_ACTIVE", message: "Operational access requires an active organization." } };
+        }
+        if (organization.serviceEnabled !== true && String(organization.serviceEnabled).toLowerCase() !== "true") {
+          return { ok: false, error: { code: "SERVICE_DISABLED", message: "The organization service is not enabled." } };
+        }
       }
-      if (!allowProspect && organization.status !== "ACTIVE") {
-        return { ok: false, error: { code: "ORGANIZATION_NOT_ACTIVE", message: "Operational access requires an active organization." } };
-      }
-      if (organization.serviceEnabled !== true && String(organization.serviceEnabled).toLowerCase() !== "true") {
-        return { ok: false, error: { code: "SERVICE_DISABLED", message: "The organization service is not enabled." } };
-      }
-      if (organization.country === "Botswana" && organization.currency !== "BWP" ||
-          organization.country === "Eswatini" && organization.currency !== "SZL" ||
+      if ((organization.country === "Botswana" && organization.currency !== "BWP") ||
+          (organization.country === "Eswatini" && organization.currency !== "SZL") ||
           ["Botswana", "Eswatini"].indexOf(String(organization.country)) < 0) {
+        return { ok: false, error: { code: "CONFIGURATION_INVALID", message: "Organization configuration could not be verified." } };
+      }
+      if (typeof organization.configVersion !== "string" && typeof organization.configVersion !== "number") {
         return { ok: false, error: { code: "CONFIGURATION_INVALID", message: "Organization configuration could not be verified." } };
       }
       return { ok: true, organization: organization };
@@ -63,7 +72,7 @@ var ReclaimService = (function () {
       if (!identity.ok) return identity;
       var membership = membershipFor(identity.actorId, organizationId, requiredRole);
       if (!membership.ok) return membership;
-      var organization = organizationFor(organizationId, allowProspect);
+      var organization = organizationFor(organizationId, allowProspect, requiredRole);
       if (!organization.ok) return organization;
       return { ok: true, actorId: identity.actorId, membership: membership.membership, organization: organization.organization };
     }
@@ -77,7 +86,8 @@ var ReclaimService = (function () {
       });
     }
     function denied(result, action, correlationId, organizationId) {
-      var context = { actorId: "", organization: { organizationId: organizationId || "" } };
+      var identity = actor();
+      var context = { actorId: identity.ok ? identity.actorId : "unknown", organization: { organizationId: typeof organizationId === "string" ? organizationId : "" } };
       var logged = audit(context, action, "DENIED", result.error && result.error.code || "DENIED", "", "");
       if (!logged.ok) return safe("AUDIT_UNAVAILABLE", "Request could not be safely completed.", correlationId);
       return safe(result.error && result.error.code || "REQUEST_DENIED",
@@ -107,7 +117,6 @@ var ReclaimService = (function () {
       }
       var context = contextFor(target, "PLATFORM_ADMIN", true);
       if (!context.ok) return denied(context, "SET_ORGANIZATION_SERVICE", correlationId, target);
-      if (context.organization.status === "ARCHIVED") return denied({ error: { code: "ORGANIZATION_INACTIVE", message: "Archived organizations cannot be changed." } }, "SET_ORGANIZATION_SERVICE", correlationId, target);
       var payload = JSON.stringify({ organizationId: target, serviceEnabled: request.serviceEnabled });
       if (typeof deps.digest !== "function") return safe("DIGEST_UNAVAILABLE", "Operation could not be safely prepared.", correlationId);
       var digest;
@@ -126,9 +135,8 @@ var ReclaimService = (function () {
         var pre = audit(refreshed, "SET_ORGANIZATION_SERVICE", "ATTEMPTED", "", request.operationId, target);
         if (!pre.ok) throw new Error("AUDIT_REQUIRED");
         var updated;
-        try {
-          updated = deps.repository.updateOrganizationServiceEnabled(target, request.serviceEnabled, now());
-        } catch (_) { throw new Error("WRITE_OUTCOME_UNCERTAIN"); }
+        try { updated = deps.repository.updateOrganizationServiceEnabled(target, request.serviceEnabled, now()); }
+        catch (_) { throw new Error("WRITE_OUTCOME_UNCERTAIN"); }
         if (!updated) return { ok: false, error: { code: "ORGANIZATION_NOT_FOUND", message: "Organization could not be verified." } };
         var post = audit(refreshed, "SET_ORGANIZATION_SERVICE", "SUCCEEDED", "", request.operationId, target);
         if (!post.ok) throw new Error("POST_WRITE_AUDIT_UNAVAILABLE");

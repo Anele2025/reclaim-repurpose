@@ -144,7 +144,8 @@ var ReclaimWhatsAppSheetsStore = (function () {
                 audit("EVENT", organizationId, eventId, "MANUAL_REVIEW", "LEASE_EXPIRED_REVIEW_REQUIRED");
                 return { status: "UNAVAILABLE", code: "RECONCILIATION_REQUIRED" };
               }
-              if (existing.status === "RECONCILIATION_REQUIRED" || !["RETRYABLE"].includes(existing.status)) return { status: "UNAVAILABLE" };
+              if (existing.status === "RECONCILIATION_REQUIRED") return { status: "UNAVAILABLE", code: "RECONCILIATION_REQUIRED" };
+              if (!["RETRYABLE"].includes(existing.status)) return { status: "UNAVAILABLE", code: "EVENT_STATE_UNAVAILABLE" };
               var token = newClaimToken();
               existing.status = "PROCESSING"; existing.claimToken = token; existing.claimedAt = stamp;
               existing.leaseExpiresAt = stamp + leaseMs; existing.attempts = Number(existing.attempts || 0) + 1;

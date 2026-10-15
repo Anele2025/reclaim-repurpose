@@ -14,7 +14,7 @@ function fixture(options = {}) {
   const deps = {
     verifyWebhook: () => { state.verifyCalls++; return options.verified !== false; },
     parseWebhook: request => { state.parseCalls++; if (options.parseThrows) throw new Error("bad"); return request.payload; },
-    resolveOrganization: request => { state.routeCalls++; return options.organization || request.trustedRoute || ""; },
+    resolveOrganization: request => { state.routeCalls++; return Object.prototype.hasOwnProperty.call(options, "organization") ? options.organization : (request.trustedRoute || ""); },
     digestEvent: event => JSON.stringify({ eventId: event.eventId, senderId: event.senderId, type: event.type, text: event.text, latitude: event.latitude, longitude: event.longitude }),
     eventStore: { claim(id, digest, org) {
       const previous = state.events.get(id);
@@ -84,7 +84,7 @@ test("valid flow requires name, WhatsApp location, and explicit confirmation bef
   const f = fixture();
   assert.match(message(send(f.api, txt("e1", "hello"))), /full name/i);
   assert.match(message(send(f.api, txt("e2", "Synthetic Customer"))), /share your location/i);
-  assert.match(message(send(f.api, txt("e3", "address: UB campus"))), /still share/i);
+  assert.match(message(send(f.api, txt("e3", "address: UB campus"))), /share your WhatsApp location/i);
   assert.match(message(send(f.api, loc("e4"))), /Reply CONFIRM/i);
   assert.equal(f.state.registrations.length, 0);
   const done = send(f.api, txt("e5", "CONFIRM"));

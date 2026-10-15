@@ -61,7 +61,7 @@ function fixtures(actorId, memberships, options = {}) {
   }) };
   const service = context.ReclaimService.create({
     identity: { resolveCurrentActor: () => actorId ? { ok: true, actorId } : { ok: false, error: { code: "IDENTITY_UNAVAILABLE" } } },
-    session: {}, repository, audit: context.ReclaimAudit, idempotency: idem, lockService,
+    session: {}, repository, authorization: auth, audit: context.ReclaimAudit, idempotency: idem, lockService,
     digest: value => "test-digest:" + value,
     idGenerator: () => "synthetic-id-" + (++seq),
     clock: { now: () => "2026-10-15T00:00:00.000Z" }

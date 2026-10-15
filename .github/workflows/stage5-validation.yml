@@ -1,0 +1,32 @@
+name: Stage 5.1 validation
+
+on:
+  pull_request:
+    paths:
+      - "apps-script/**"
+      - "docs/digital/**"
+      - "README.md"
+      - "scripts/validate_stage4.py"
+      - ".github/workflows/stage5-validation.yml"
+  push:
+    branches:
+      - stage-5-working-mvp
+
+jobs:
+  pure-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run Apps Script pure validation tests
+        run: node --test apps-script/tests/validation.test.js
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Validate Stage 4 templates and links
+        run: python scripts/validate_stage4.py

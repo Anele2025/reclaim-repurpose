@@ -31,6 +31,10 @@ MODULE_ORDER = (
 REQUIRED_ENTRYPOINTS = (
     "reclaimGetMyOrganizationSummary",
     "reclaimSetOrganizationServiceEnabled",
+    "reclaimRecordCollection",
+    "reclaimGetCollectionRecord",
+    "reclaimListCollectionRecords",
+    "reclaimRecordCollectionHandover",
 )
 FORBIDDEN_PATTERNS = (
     (re.compile(r"\brequire\s*\("), "CommonJS require() is not supported in the Apps Script package"),

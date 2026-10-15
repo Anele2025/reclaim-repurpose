@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import html
+from contextlib import contextmanager
 import io
 import math
 import os
@@ -72,6 +73,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
 def now():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
+@contextmanager
 def connect(path=None):
     target = str(path or DB_PATH)
     if target != ":memory:":
@@ -79,7 +81,14 @@ def connect(path=None):
     db = sqlite3.connect(target)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys=ON")
-    return db
+    try:
+        yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 def initialize_database(path=None):
     with connect(path) as db:

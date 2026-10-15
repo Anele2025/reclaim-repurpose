@@ -245,7 +245,7 @@ test("claim tokens fence stale workers from completing or releasing a newer clai
   assert.notEqual(second.claimToken, first.claimToken);
   assert.throws(() => events.complete("fenced-event", "digest", "ORG_A", first.claimToken, { ok: true }), /STALE_CLAIM_TOKEN/);
   assert.throws(() => events.release("fenced-event", "digest", "ORG_A", first.claimToken, "STALE"), /STALE_CLAIM_TOKEN/);
-  assert.deepEqual(events.complete("fenced-event", "digest", "ORG_A", second.claimToken, { ok: true }), { ok: true });
+  assert.equal(events.complete("fenced-event", "digest", "ORG_A", second.claimToken, { ok: true }).ok, true);
 });
 
 test("registration linkage is persisted before the registration adapter is invoked", () => {

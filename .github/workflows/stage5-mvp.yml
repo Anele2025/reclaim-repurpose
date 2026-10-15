@@ -1,0 +1,31 @@
+name: Stage 5 MVP checks
+
+on:
+  push:
+    branches:
+      - stage-5-working-mvp
+  pull_request:
+    branches:
+      - stage-4-validation-evidence
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile application
+        run: python -m py_compile app.py
+      - name: Run MVP tests
+        run: python -m unittest discover -s tests -v
+      - name: Validate operational records
+        run: python scripts/validate_operations.py
+      - name: Validate Stage 4 registers
+        run: python scripts/validate_stage4.py

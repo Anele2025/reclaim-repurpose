@@ -98,3 +98,19 @@ The scenario CSV contains spreadsheet formulas; confirm recalculation after impo
 
 **RECLAIM & REPURPOSE**  
 *Circular Solutions. Lasting Impact.*
+
+### Stage 3 — Pilot workflow, safety and traceability
+
+Stage 3 adds draft procedures and checklists for a future controlled pilot. The examples are fictional test data; no operation, destination, permit or recycling outcome is claimed.
+
+- [Master pilot operating procedures](docs/operations/PILOT_OPERATING_PROCEDURES.md)
+- [Collection and weighing SOP](docs/operations/COLLECTION_AND_WEIGHING_SOP.md)
+- [Sorting, storage and handover SOP](docs/operations/SORTING_STORAGE_AND_HANDOVER_SOP.md)
+- [Exceptions, incidents and corrective actions](docs/operations/EXCEPTIONS_INCIDENTS_AND_CORRECTIVE_ACTIONS.md)
+- [Safety and compliance checklist (separate BW/SZ verification)](docs/operations/SAFETY_AND_COMPLIANCE_CHECKLIST.md)
+- [Daily and monthly reconciliation](docs/operations/DAILY_AND_MONTHLY_RECONCILIATION.md)
+- [Handover checklist CSV](templates/operations/handover_checklist.csv)
+- [Exception log CSV](templates/operations/exception_log.csv)
+- [Compliance verification CSV](templates/operations/compliance_verification.csv)
+
+Stage 3 documents the process; it does not authorize a pilot. Site permission, country-specific compliance, safe handling, a verified destination, actual customer evidence and working capital remain external readiness gates.

@@ -38,12 +38,12 @@ Status applies to the particular input/claim; a buyer quotation is not a sale, a
 - Actual cash received is populated only from the explicit `ActualCashReceivedInput`; it is not inferred from projected revenue. Blank actual cash returns `INSUFFICIENT_DATA`.
 
 ## Material flow: do not double-count
-The scenario model calculates collected, sorted, accepted, expected-sale, and evidence-backed recycling quantities as separate stages. It does not sum those stages together. “RejectedOrUnresolvedKg” is a conservative residual (total collected less accepted) and may include sorting losses/contamination as well as material not accepted; it is not a confirmed partner rejection figure. Reconcile with Stage 1 material-event records for actual reporting. Confirmed recycling output remains `INSUFFICIENT_EVIDENCE` unless the evidence status is `VERIFIED` and an actual recycled quantity is entered. A scenario forecast cannot itself prove reuse or recycling.
+The scenario model calculates collected, contamination-adjusted sorted, accepted, expected-sale, and evidence-backed recycling quantities as separate stages. It does not sum those stages together. “RejectedOrUnresolvedKg” is a conservative residual (total collected less accepted) and may include sorting losses/contamination as well as material not accepted; it is not a confirmed partner rejection figure. Reconcile with Stage 1 material-event records for actual reporting. Confirmed recycling output remains `INSUFFICIENT_EVIDENCE` unless the evidence status is `VERIFIED` and an actual recycled quantity is entered. A scenario forecast cannot itself prove reuse or recycling.
 
 ## Main formulas and interpretation
 - Total collections = months × sites × collections per site per month.
 - Total collected by material = total collections × kg per collection for that material.
-- Sorted quantity by material = collected quantity × that material's sort yield.
+- Sorted quantity by material = collected quantity × (1 − contamination rate) × that material's sort yield. The yield is applied to the remaining material after the assumed contaminated share is removed.
 - Accepted quantity = total sorted quantity × partner acceptance rate.
 - Variable costs = total collections × (labour hours per collection × labour cost per hour + transport cost per collection + consumables per collection).
 - Fixed costs = sites × months × monthly fixed cost per site + months × monthly shared fixed cost.
@@ -58,7 +58,7 @@ The scenario model calculates collected, sorted, accepted, expected-sale, and ev
 
 ## Important limitations and decision use
 - The model is a planning template, not an automated financial system. CSV does not enforce data types, valid ranges, unique IDs, currency compatibility, or audit history. Validate inputs manually and protect operational records.
-- Scenario formulas use assumed aggregate partner acceptance. For actual reporting, acceptance and rejection must be tied to documented handovers, by material and event. The scenario model is not a substitute for the Stage 1 lifecycle register.
+- Scenario formulas use a configurable contamination rate and assumed aggregate partner acceptance. For actual reporting, acceptance and rejection must be tied to documented handovers, by material and event. The scenario model is not a substitute for the Stage 1 lifecycle register.
 - The model does not calculate tax, depreciation, financing, inflation, foreign exchange, complex payment schedules, or legal compliance. Add only with country-specific evidence and competent advice.
 - If any critical cost, permission, safe destination, buyer acceptance condition, or funding source is unknown, treat the decision as unresolved rather than assuming the missing value is zero.
 - Optimistic results are not proof of viability. Test lower volumes, higher transport/labour, greater rejection, lower buyer prices, delayed/non-payment and zero material-sale revenue before proceeding.

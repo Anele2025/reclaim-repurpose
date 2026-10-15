@@ -212,7 +212,7 @@ var ReclaimWhatsAppRegistration = (function () {
           try { deps.eventStore.release(event.eventId, digest, organizationId); } catch (_) {}
           // A retryable workflow failure must not be wrapped in an overall
           // success response that a webhook adapter could acknowledge.
-          return failure(result.code || "PROCESSING_RETRYABLE",
+          return failure("PROCESSING_RETRYABLE",
             "Message could not be safely processed; retry later.");
         }
         try {

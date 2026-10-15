@@ -56,9 +56,12 @@ The fake-spreadsheet fixture remains synthetic. A seeded conflicting row models 
 
 ## Validation status
 
-**GitHub Actions validation is pending for the Stage 5.13 pull-request head.** Do not treat the branch as verified until the relevant runs have completed successfully. The workflows were updated to include the Stage 5.13 branch in push triggers.
+**Automated repository validation passed for implementation commit `35a0de577b76a2ea1cef0550badbce0f8664895a`.**
 
-After CI completes, record the exact final tested commit, run IDs, outcomes, and test counts here. If any check fails, fix the cause, rerun validation, and update this report with the final evidence rather than reporting a presumed pass.
+- [Stage 5 validation #38826720751](https://github.com/Anele2025/reclaim-repurpose/actions/runs/38826720751): **success** — 131 JavaScript tests passed, 0 failed; 4 Python package tests passed; deterministic package build, generated-package content checks, generated JavaScript syntax check, and Stage 4 validation passed.
+- [Security Evidence Validation #38826720762](https://github.com/Anele2025/reclaim-repurpose/actions/runs/38826720762): **success** — evidence-validator tests, adversarial evidence-gate tests, all 131 JavaScript tests, 4 Python package tests, deterministic package build, generated syntax check, and Stage 4 validation passed.
+- The run logs confirm both workflows completed successfully for the Stage 5.13 pull-request head at that time. The report-only evidence update may advance the branch head; inspect the latest PR head and Actions runs before treating that newer commit as verified.
+- These are repository/fixture checks only. They do not prove real Google Sheets concurrency, transactional behavior, exactly-once processing, live integration, or deployment.
 
 ## Limitations and non-goals
 

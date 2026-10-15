@@ -5,7 +5,7 @@
 
 RECLAIM & REPURPOSE is being developed as a Southern African circular-economy initiative focused on helping communities and organizations recover useful materials, reduce avoidable waste, and measure environmental and economic outcomes.
 
-> **Current stage:** Project foundation and pilot design. This repository does not yet represent a deployed or operational service.
+> **Current stage:** Stage 5 MVP implementation. The application is a local development prototype, not a deployed or production-ready service.
 
 ## Purpose
 
@@ -42,7 +42,7 @@ No pilot results should be reported until they have actually been collected and 
 
 ## Digital project direction
 
-This repository will hold the project's documentation, operating templates, and—when the requirements are validated—digital tools to support operations and impact reporting. The software should serve the real service model, not substitute for validating it.
+This repository holds the project's documentation, operating templates, and a working local-first software MVP. Application development proceeds while customer, partner, site-permission and economic validation run in parallel. Software functionality is not proof of commercial demand or authorization to operate.
 
 ### Operational record templates
 
@@ -65,8 +65,9 @@ All included rows are fictional test data. These are repository CSV files, not a
 - [ ] Verify material acceptance criteria, local requirements, and operating costs.
 - [ ] Prepare the pilot plan, responsibilities, and safety checklist.
 - [x] Draft spreadsheet-ready operational record templates and a field/validation guide (Stage 1; test data only).
-- [ ] Run and evaluate a small pilot before building unnecessary automation.
-- [ ] Specify and implement digital tools based on evidence from the pilot.
+- [x] Start implementing the software MVP while market validation proceeds in parallel (Stage 5; local prototype only).
+- [ ] Test the MVP with realistic workflows and improve it using validation evidence.
+- [ ] Authorize any physical pilot only after applicable legal, site, safety and destination gates are evidenced as satisfied.
 
 ## Geographic approach
 
@@ -138,3 +139,47 @@ Stage 4 provides research plans and blank spreadsheet-ready registers for Botswa
 - [Stage 4 structure validator](scripts/validate_stage4.py)
 
 The country-requirements note includes initial source leads; applicability to the actual site, material and activity remains to be verified with relevant authorities or qualified local advisers. Do not start collection, sorting, storage, transport or handover until applicable permission, safety, legal and receiving-partner requirements are satisfied. All Stage 4 CSVs are blank templates, not evidence of market validation.
+
+
+## Stage 5 — Working local MVP
+
+A local-first browser application is available in \`app.py\`. It uses Python's standard library and SQLite; it does not require a separate database server or third-party Python packages.
+
+### Start the application
+
+Prerequisite: Python 3.10 or later.
+
+From the repository root, run:
+
+\`\`\`bash
+python -m py_compile app.py
+python app.py
+\`\`\`
+
+Open \`http://127.0.0.1:8000\` in your browser. The application creates its SQLite database at \`data/reclaim.db\` by default. To use another database file, set \`RECLAIM_DB_PATH\` before starting the application.
+
+The app currently supports creating site, recovery-partner, collection, handover, finance and compliance records; dashboard counts; basic table views; CSV exports; server-side input validation; SQLite foreign keys and constraints; and a basic creation audit log. Botswana records use BWP and Eswatini records use SZL. Handover records distinguish offered, accepted and rejected quantities. Final handover acceptance requires an evidence reference; acceptance is not represented as proof of final recycling.
+
+### Tests and structural checks
+
+Run:
+
+\`\`\`bash
+python -m unittest discover -s tests -v
+python scripts/validate_operations.py
+python scripts/validate_stage4.py
+\`\`\`
+
+GitHub Actions runs these checks on the Stage 5 branch and its pull request.
+
+### Critical limitations
+
+- This is an unauthenticated development prototype. It binds to localhost only and must not be exposed to the public internet.
+- Do not enter sensitive personal data or confidential business records.
+- It does not yet provide organization-owner accounts, multi-tenant access control, record editing/archiving workflows, production deployment, backups, or hardened production security.
+- It does not send WhatsApp messages, process payments, or verify blockchain events.
+- Material quantities and evidence references are only as reliable as the information entered. The application does not independently verify weights, partner claims, permits, or downstream recovery.
+- It does not calculate carbon savings or claim that collected or accepted material was recycled.
+- No real customer, collection, finance, permission, partner, or impact data is included.
+
+This application is a software-development milestone, not permission to begin collection, sorting, storage, transportation or handover. Those activities remain subject to the applicable requirements and verified site, safety and destination arrangements.

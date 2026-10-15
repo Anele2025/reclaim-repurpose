@@ -168,7 +168,7 @@ var ReclaimWhatsAppRegistration = (function () {
         }
         if (claim.status === "CONFLICT") return failure("EVENT_ID_CONFLICT", "Conflicting duplicate event was rejected.");
         if (claim.status === "REPLAY") {
-          results.push(claim.result || response(true, "DUPLICATE_IGNORED", "Duplicate message ignored."));
+          results.push(response(true, "DUPLICATE_IGNORED", "Duplicate message ignored."));
           continue;
         }
         if (claim.status === "IN_PROGRESS") {

@@ -114,3 +114,27 @@ Stage 3 adds draft procedures and checklists for a future controlled pilot. The 
 - [Compliance verification CSV](templates/operations/compliance_verification.csv)
 
 Stage 3 documents the process; it does not authorize a pilot. Site permission, country-specific compliance, safe handling, a verified destination, actual customer evidence and working capital remain external readiness gates.
+
+
+### Stage 4 — Customer, recovery-partner, site-permission and evidence validation
+
+Stage 4 provides research plans and blank spreadsheet-ready registers for Botswana and Eswatini. The documents do not represent completed interviews, verified demand, a partner agreement, site approval, legal clearance or pilot results.
+
+- [Stage 4 validation plan](docs/validation/STAGE_4_VALIDATION_PLAN.md)
+- [Customer interview guide](docs/validation/CUSTOMER_INTERVIEW_GUIDE.md)
+- [Recovery-partner qualification guide](docs/validation/RECOVERY_PARTNER_QUALIFICATION_GUIDE.md)
+- [Site access and permission guide](docs/validation/SITE_ACCESS_AND_PERMISSION_GUIDE.md)
+- [Botswana and Eswatini requirements research](docs/validation/BOTSWANA_ESWATINI_REQUIREMENTS_RESEARCH.md)
+- [Evidence standards and decision rules](docs/validation/EVIDENCE_STANDARDS_AND_DECISION_RULES.md)
+- [Stage 4 findings report template](docs/validation/STAGE_4_FINDINGS_REPORT_TEMPLATE.md)
+- [Economic assumption validation](docs/validation/ECONOMIC_ASSUMPTION_VALIDATION.md)
+- [Customer/site prospects register](templates/validation/customer_site_prospects.csv)
+- [Customer interview register](templates/validation/customer_interviews.csv)
+- [Recovery-partner register](templates/validation/recovery_partner_register.csv)
+- [Site-permission register](templates/validation/site_permissions.csv)
+- [Country requirements register](templates/validation/country_requirements_register.csv)
+- [Evidence register](templates/validation/evidence_register.csv)
+- [Validation decision log](templates/validation/validation_decisions.csv)
+- [Stage 4 structure validator](scripts/validate_stage4.py)
+
+The country-requirements note includes initial source leads; applicability to the actual site, material and activity remains to be verified with relevant authorities or qualified local advisers. Do not start collection, sorting, storage, transport or handover until applicable permission, safety, legal and receiving-partner requirements are satisfied. All Stage 4 CSVs are blank templates, not evidence of market validation.

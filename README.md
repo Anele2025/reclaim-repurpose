@@ -80,6 +80,20 @@ This project is in development. No customer contracts, collection volumes, recyc
 
 The immediate priority is to establish a credible operating model and a small, measurable pilot. Suggestions should be practical, safety-conscious, and supported by evidence wherever possible.
 
+
+### Stage 2 — Pilot economics and decision tools
+
+Stage 2 adds a configurable, spreadsheet-compatible planning model. All included numbers are fictional `TEST_DATA`, not market facts, quotations, contracts or results.
+
+- [Pilot economics guide](docs/finance/PILOT_ECONOMICS_GUIDE.md)
+- [Pilot assumptions register](templates/finance/pilot_assumptions.csv)
+- [Pilot costs tracker](templates/finance/pilot_costs.csv)
+- [Pilot revenue tracker](templates/finance/pilot_revenue.csv)
+- [Scenario model: pessimistic/base/optimistic for BW and SZ separately](templates/finance/scenario_model.csv)
+- [Pilot proceed/redesign/pause checklist](docs/finance/PILOT_DECISION_CHECKLIST.md)
+
+The scenario CSV contains spreadsheet formulas; confirm recalculation after importing into Excel or Google Sheets. The model separates expected revenue from actual cash, keeps BWP and SZL separate, and does not infer recycling from collection or partner acceptance. It is a planning tool, not proof of pilot viability.
+
 ---
 
 **RECLAIM & REPURPOSE**  

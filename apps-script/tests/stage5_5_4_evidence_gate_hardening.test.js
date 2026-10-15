@@ -56,7 +56,7 @@ test("baseline passes structural validation while the effective gate remains blo
 test("complete synthetic claims cannot authorize the effective live gate", () => {
   const value = verifiedClaim();
   value.cases.forEach(item => { item.environment = "SYNTHETIC"; });
-  assert.throws(() => validateManifest(value), /cannot be PASS outside GOOGLE_LIVE/);
+  assert.throws(() => validateManifest(value), /requires GOOGLE_LIVE evidence/);
 });
 
 test("editing gateStatus alone cannot pass the live gate", () => {
@@ -146,7 +146,7 @@ test("ordinary words in safe repository paths are not treated as placeholders", 
   assert.equal(validEvidenceRef("docs/digital/security-evidence/owner-review/approval-record.pdf"), true);
 });
 
-test("NOT_STARTED and BLOCKED cannot retain stale execution evidence", () => {
+test("NOT_EXECUTED and BLOCKED cannot retain stale execution evidence", () => {
   const notStarted = clone(baseline);
   notStarted.cases[0].executionCommitSha = SHA;
   assert.throws(() => validateManifest(notStarted), /executionCommitSha must be null/);
@@ -161,10 +161,11 @@ test("FAIL requires an execution record and consistent aggregate status", () => 
   const value = clone(baseline);
   Object.assign(value.cases[0], {
     status: "FAIL",
-    environment: "SYNTHETIC",
+    environment: "GOOGLE_LIVE",
     executedAt: "2026-10-15T10:00:00Z",
     executionCommitSha: SHA,
-    observedOutcome: "Synthetic regression failed as expected.",
+    observedOutcome: "Live synthetic-account security test failed as expected.",
+    executionMethod: "Manual authenticated Apps Script execution under a restricted test deployment",
     evidenceRef: "docs/digital/security-evidence/test-runs/failure-record.md",
     verifierRole: "AUTHORIZED_PROJECT_OWNER"
   });

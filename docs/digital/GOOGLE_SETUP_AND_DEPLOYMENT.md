@@ -28,6 +28,8 @@ Set Script Property `RECLAIM_SPREADSHEET_ID` to the dedicated synthetic-data tes
 - `Memberships`: `membershipId, organizationId, actorId, role, status, createdAt, updatedAt, revokedAt`
 - `AuditEvents`: `eventId, timestamp, actorId, organizationId, action, outcome, reasonCode, operationId, recordRef, configVersion`
 - `Idempotency`: `operationId, actorId, organizationId, operationType, payloadDigest, status, resultRef, createdAt, updatedAt, resultJson, correlationId`
+- `CollectionSites`: `siteId, organizationId, siteName, country, locationDescription, status, createdAt, updatedAt, createdBy, updatedBy`
+- `CustomerRegistrations`: `registrationId, organizationId, customerName, customerPhone, locationDescription, latitude, longitude, status, createdAt, updatedAt, createdBy, operationId`
 
 Protect the spreadsheet so only project administrators and the required script execution identity can access it. Spreadsheet IDs are locators, not authorization. Do not share the underlying workbook with company owners unless a separate reviewed security design proves direct access cannot bypass the application boundary.
 

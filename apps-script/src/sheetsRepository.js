@@ -5,11 +5,14 @@ var ReclaimSheetsRepository = (function () {
     Organizations: ["organizationId","organizationName","country","currency","status","serviceEnabled","configVersion","createdAt","updatedAt"],
     Memberships: ["membershipId","organizationId","actorId","role","status","createdAt","updatedAt","revokedAt"],
     AuditEvents: ["eventId","timestamp","actorId","organizationId","action","outcome","reasonCode","operationId","recordRef","configVersion"],
-    Idempotency: ["operationId","actorId","organizationId","operationType","payloadDigest","status","resultRef","createdAt","updatedAt","resultJson","correlationId"]
+    Idempotency: ["operationId","actorId","organizationId","operationType","payloadDigest","status","resultRef","createdAt","updatedAt","resultJson","correlationId"],
+    CollectionSites: ["siteId","organizationId","siteName","country","locationDescription","status","createdAt","updatedAt","createdBy","updatedBy"],
+    CollectionRecords: ["collectionId","organizationId","siteId","collectedAt","materialCategory","quantity","unit","collectorRef","destinationPartnerId","handoverRef","evidenceRef","status","createdAt","updatedAt","createdBy","operationId"],
+    CustomerRegistrations: ["registrationId","organizationId","customerName","customerPhone","locationDescription","latitude","longitude","status","createdAt","updatedAt","createdBy","operationId"]
   });
   var STABLE_IDS = Object.freeze({
     Organizations: "organizationId", Memberships: "membershipId",
-    AuditEvents: "eventId", Idempotency: "operationId"
+    AuditEvents: "eventId", Idempotency: "operationId", CollectionSites: "siteId", CollectionRecords: "collectionId", CustomerRegistrations: "registrationId"
   });
   function safeText(value) {
     if (typeof value !== "string") return value;
@@ -37,6 +40,8 @@ var ReclaimSheetsRepository = (function () {
       return values.map(function (row, offset) {
         var record = {};
         SCHEMAS[name].forEach(function (key, i) { record[key] = row[i]; });
+        if (name === "CustomerRegistrations" && (!/^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/.test(String(record.registrationId)) || !/^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/.test(String(record.organizationId)) || typeof record.customerName !== "string" || !record.customerName.trim() || record.customerName.length > 120 || typeof record.customerPhone !== "string" || !record.customerPhone.trim() || record.customerPhone.length > 32 || typeof record.locationDescription !== "string" || record.locationDescription.length > 240 || typeof record.latitude !== "number" || !isFinite(record.latitude) || record.latitude < -90 || record.latitude > 90 || typeof record.longitude !== "number" || !isFinite(record.longitude) || record.longitude < -180 || record.longitude > 180 || record.status !== "REGISTERED" || typeof record.createdAt !== "string" || !record.createdAt || typeof record.updatedAt !== "string" || !record.updatedAt)) throw new Error("PERSISTED_CUSTOMER_REGISTRATION_INVALID");
+        if (name === "CollectionSites" && (!/^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/.test(String(record.siteId)) || !/^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/.test(String(record.organizationId)) || typeof record.siteName !== "string" || !record.siteName.trim() || record.siteName.length > 120 || ["Botswana","Eswatini"].indexOf(String(record.country)) < 0 || ["ACTIVE","INACTIVE"].indexOf(String(record.status)) < 0 || typeof record.locationDescription !== "string" || record.locationDescription.length > 240 || typeof record.createdAt !== "string" || !record.createdAt || typeof record.updatedAt !== "string" || !record.updatedAt)) throw new Error("PERSISTED_SITE_INVALID");
         return { record: record, rowNumber: offset + 2 };
       });
     }
@@ -63,7 +68,10 @@ var ReclaimSheetsRepository = (function () {
         Organizations: ["organizationId","organizationName","country","currency","status","serviceEnabled","configVersion"],
         Memberships: ["membershipId","organizationId","actorId","role","status"],
         AuditEvents: ["eventId","timestamp","action","outcome"],
-        Idempotency: ["operationId","actorId","organizationId","operationType","payloadDigest","status","correlationId"]
+        Idempotency: ["operationId","actorId","organizationId","operationType","payloadDigest","status","correlationId"],
+        CollectionSites: ["siteId","organizationId","siteName","country","status","createdAt","updatedAt","createdBy","updatedBy"],
+        CollectionRecords: ["collectionId","organizationId","siteId","collectedAt","materialCategory","quantity","unit","status","createdAt","updatedAt","createdBy","operationId"],
+        CustomerRegistrations: ["registrationId","organizationId","customerName","customerPhone","latitude","longitude","status","createdAt","updatedAt","createdBy","operationId"]
       }[name];
       if (required && required.some(function (key) { return record[key] === undefined || record[key] === null || String(record[key]).trim() === ""; })) {
         throw new Error("REQUIRED_FIELD_MISSING");
@@ -80,6 +88,29 @@ var ReclaimSheetsRepository = (function () {
         if (record.role === "PLATFORM_ADMIN" && record.organizationId && record.organizationId !== "PLATFORM") throw new Error("INVALID_ADMIN_SCOPE");
       }
       if (name === "Idempotency" && ["PROCESSING","SUCCEEDED","FAILED_RETRYABLE","RECONCILIATION_REQUIRED"].indexOf(record.status) < 0) throw new Error("INVALID_OPERATION_STATUS");
+      if (name === "CollectionSites") {
+        if (!/^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/.test(String(record.siteId)) || !/^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/.test(String(record.organizationId))) throw new Error("INVALID_SITE_SCOPE");
+        if (typeof record.siteName !== "string" || !record.siteName.trim() || record.siteName.trim().length > 120) throw new Error("INVALID_SITE_NAME");
+        if (["Botswana","Eswatini"].indexOf(record.country) < 0) throw new Error("UNSUPPORTED_SITE_COUNTRY");
+        if (["ACTIVE","INACTIVE"].indexOf(record.status) < 0) throw new Error("INVALID_SITE_STATUS");
+        if (typeof record.locationDescription !== "string" || record.locationDescription.length > 240) throw new Error("INVALID_SITE_LOCATION");
+        if (typeof record.createdAt !== "string" || !record.createdAt || typeof record.updatedAt !== "string" || !record.updatedAt) throw new Error("INVALID_SITE_TIMESTAMP");
+      }
+      if (name === "CustomerRegistrations") {
+        if (!/^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/.test(String(record.registrationId)) || !/^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/.test(String(record.organizationId))) throw new Error("INVALID_CUSTOMER_REGISTRATION_SCOPE");
+        if (typeof record.customerName !== "string" || !record.customerName.trim() || record.customerName.trim().length > 120 || /[\u0000-\u001F]/.test(record.customerName)) throw new Error("INVALID_CUSTOMER_NAME");
+        if (typeof record.customerPhone !== "string" || !record.customerPhone.trim() || record.customerPhone.length > 32) throw new Error("INVALID_CUSTOMER_PHONE");
+        if (typeof record.locationDescription !== "string" || record.locationDescription.length > 240) throw new Error("INVALID_CUSTOMER_LOCATION");
+        if (typeof record.latitude !== "number" || !isFinite(record.latitude) || record.latitude < -90 || record.latitude > 90 || typeof record.longitude !== "number" || !isFinite(record.longitude) || record.longitude < -180 || record.longitude > 180) throw new Error("INVALID_CUSTOMER_COORDINATES");
+        if (record.status !== "REGISTERED") throw new Error("INVALID_CUSTOMER_REGISTRATION_STATUS");
+      }
+      if (name === "CollectionRecords") {
+        if (!/^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/.test(String(record.organizationId)) || !/^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/.test(String(record.siteId))) throw new Error("INVALID_COLLECTION_SCOPE");
+        if (typeof record.quantity !== "number" || !isFinite(record.quantity) || record.quantity <= 0) throw new Error("INVALID_COLLECTION_QUANTITY");
+        if (["PLASTIC","PAPER","CARDBOARD","GLASS","METAL","ORGANIC","E_WASTE","TEXTILES","MIXED_RECYCLABLES","OTHER"].indexOf(record.materialCategory) < 0) throw new Error("INVALID_MATERIAL_CATEGORY");
+        if (["kg","g","tonne","item","bag","litre"].indexOf(record.unit) < 0) throw new Error("INVALID_COLLECTION_UNIT");
+        if (["RECORDED","HANDED_OVER"].indexOf(record.status) < 0) throw new Error("INVALID_COLLECTION_STATUS");
+      }
       if (name === "AuditEvents" && ["SUCCEEDED","DENIED","ATTEMPTED","FAILED","REPLAYED","RECOVERED"].indexOf(record.outcome) < 0) throw new Error("INVALID_AUDIT_OUTCOME");
       var existing = stable ? findAll(name, stable, record[stable]) : [];
       if (existing.length) throw new Error("DUPLICATE_STABLE_ID");
@@ -111,6 +142,12 @@ var ReclaimSheetsRepository = (function () {
         if (key === "status" && name === "Memberships" && ["INVITED","ACTIVE","SUSPENDED","REVOKED"].indexOf(value) < 0) throw new Error("INVALID_MEMBERSHIP_STATUS");
         if (key === "status" && name === "Idempotency" && ["PROCESSING","SUCCEEDED","FAILED_RETRYABLE","RECONCILIATION_REQUIRED"].indexOf(value) < 0) throw new Error("INVALID_OPERATION_STATUS");
         if (key === "serviceEnabled" && name === "Organizations" && typeof value !== "boolean") throw new Error("INVALID_ORGANIZATION_CONFIGURATION");
+        if (name === "CollectionSites" && key === "status" && ["ACTIVE","INACTIVE"].indexOf(value) < 0) throw new Error("INVALID_SITE_STATUS");
+        if (name === "CollectionSites" && key === "siteName" && (typeof value !== "string" || !value.trim() || value.trim().length > 120)) throw new Error("INVALID_SITE_NAME");
+        if (name === "CollectionSites" && key === "country" && ["Botswana","Eswatini"].indexOf(value) < 0) throw new Error("UNSUPPORTED_SITE_COUNTRY");
+        if (name === "CollectionSites" && key === "locationDescription" && (typeof value !== "string" || value.length > 240)) throw new Error("INVALID_SITE_LOCATION");
+        if (name === "CollectionRecords" && key === "status" && ["RECORDED","HANDED_OVER"].indexOf(value) < 0) throw new Error("INVALID_COLLECTION_STATUS");
+        if (name === "CollectionRecords" && key === "quantity" && (typeof value !== "number" || !isFinite(value) || value <= 0)) throw new Error("INVALID_COLLECTION_QUANTITY");
         record[key] = safeText(value);
       });
       sheet.getRange(matches[0].rowNumber, 1, 1, SCHEMAS[name].length)
@@ -146,6 +183,29 @@ var ReclaimSheetsRepository = (function () {
       appendAudit: function (event) { return append("AuditEvents", event); },
       appendIdempotency: function (record) { return append("Idempotency", record); },
       updateOperation: function (id, changes) { return updateById("Idempotency", id, changes); },
+      appendCollectionSite: function (record) { return append("CollectionSites", record); },
+      findCollectionSite: function (id) { return findUnique("CollectionSites", "siteId", id); },
+      findCollectionSitesForOrganization: function (organizationId, limit) {
+        var rowsForOrg = findAll("CollectionSites", "organizationId", organizationId);
+        rowsForOrg.sort(function (a, b) { return String(a.siteName).localeCompare(String(b.siteName)); });
+        return rowsForOrg.slice(0, Math.max(1, Math.min(Number(limit) || 100, 200)));
+      },
+      updateCollectionSite: function (id, changes) { return updateById("CollectionSites", id, changes); },
+      appendCollectionRecord: function (record) { return append("CollectionRecords", record); },
+      findCollectionRecord: function (id) { return findUnique("CollectionRecords", "collectionId", id); },
+      findCollectionRecordsForOrganization: function (organizationId, limit) {
+        var rowsForOrg = findAll("CollectionRecords", "organizationId", organizationId);
+        rowsForOrg.sort(function (a, b) { return String(b.collectedAt).localeCompare(String(a.collectedAt)); });
+        return rowsForOrg.slice(0, Math.max(1, Math.min(Number(limit) || 100, 200)));
+      },
+      updateCollectionRecord: function (id, changes) { return updateById("CollectionRecords", id, changes); },
+      appendCustomerRegistration: function (record) { return append("CustomerRegistrations", record); },
+      findCustomerRegistration: function (id) { return findUnique("CustomerRegistrations", "registrationId", id); },
+      findCustomerRegistrationsForOrganization: function (organizationId, limit) {
+        var rowsForOrg = findAll("CustomerRegistrations", "organizationId", organizationId);
+        rowsForOrg.sort(function (a, b) { return String(b.createdAt).localeCompare(String(a.createdAt)); });
+        return rowsForOrg.slice(0, Math.max(1, Math.min(Number(limit) || 100, 200)));
+      },
       schemas: SCHEMAS
     });
   }

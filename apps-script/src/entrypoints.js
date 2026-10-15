@@ -8,6 +8,32 @@ function reclaimGetMyOrganizationSummary(organizationId) {
 function reclaimSetOrganizationServiceEnabled(request) {
   return reclaimCreateService().setOrganizationServiceEnabled(request);
 }
+function reclaimCreateCollectionSite(request) { return reclaimCreateService().createCollectionSite(request); }
+function reclaimGetCollectionSite(request) { return reclaimCreateService().getCollectionSite(request); }
+function reclaimListCollectionSites(request) { return reclaimCreateService().listCollectionSites(request); }
+function reclaimUpdateCollectionSite(request) { return reclaimCreateService().updateCollectionSite(request); }
+function reclaimDeactivateCollectionSite(request) { return reclaimCreateService().deactivateCollectionSite(request); }
+function reclaimRecordCollection(request) {
+  return reclaimCreateService().recordCollection(request);
+}
+function reclaimGetCollectionRecord(request) {
+  return reclaimCreateService().getCollectionRecord(request);
+}
+function reclaimListCollectionRecords(request) {
+  return reclaimCreateService().listCollectionRecords(request);
+}
+function reclaimRecordCollectionHandover(request) {
+  return reclaimCreateService().recordCollectionHandover(request);
+}
+function reclaimCreateCustomerRegistration(request) {
+  return reclaimCreateService().createCustomerRegistration(request);
+}
+function reclaimGetCustomerRegistration(request) {
+  return reclaimCreateService().getCustomerRegistration(request);
+}
+function reclaimListCustomerRegistrations(request) {
+  return reclaimCreateService().listCustomerRegistrations(request);
+}
 function reclaimCreateService() {
   var props = PropertiesService.getScriptProperties();
   var repository = ReclaimSheetsRepository.create(SpreadsheetApp, props);

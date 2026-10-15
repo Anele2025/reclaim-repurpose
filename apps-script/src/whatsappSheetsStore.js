@@ -119,8 +119,18 @@ var ReclaimWhatsAppSheetsStore = (function () {
               }
               if (existing.status === "COMPLETE") return { status: "REPLAY", result: safeJson(existing.resultJson) };
               if (existing.status === "REJECTED") return { status: "REPLAY" };
-              if (existing.status === "PROCESSING" && Number(existing.leaseExpiresAt) > stamp) return { status: "IN_PROGRESS" };
-              if (!["PROCESSING", "RETRYABLE"].includes(existing.status)) return { status: "UNAVAILABLE" };
+              if (existing.status === "PROCESSING") {
+                if (Number(existing.leaseExpiresAt) > stamp) return { status: "IN_PROGRESS" };
+                // An expired lease cannot prove the prior execution stopped. Quarantine
+                // rather than steal the claim; reconciliation/manual review is required.
+                existing.status = "RECONCILIATION_REQUIRED"; existing.claimToken = "";
+                existing.leaseExpiresAt = ""; existing.updatedAt = stamp;
+                existing.lastErrorCode = "LEASE_EXPIRED_REVIEW_REQUIRED";
+                write("Events", existing._row, existing);
+                audit("EVENT", organizationId, eventId, "MANUAL_REVIEW", "LEASE_EXPIRED_REVIEW_REQUIRED");
+                return { status: "UNAVAILABLE", code: "RECONCILIATION_REQUIRED" };
+              }
+              if (existing.status === "RECONCILIATION_REQUIRED" || !["RETRYABLE"].includes(existing.status)) return { status: "UNAVAILABLE" };
               var token = String(deps.idGenerator ? deps.idGenerator("claim") : stamp + "-" + Math.random());
               existing.status = "PROCESSING"; existing.claimToken = token; existing.claimedAt = stamp;
               existing.leaseExpiresAt = stamp + leaseMs; existing.attempts = Number(existing.attempts || 0) + 1;
@@ -198,6 +208,7 @@ var ReclaimWhatsAppSheetsStore = (function () {
             var record = find(org, sender);
             if (!record) return null;
             if (Number(record.expiresAt) && Number(record.expiresAt) <= nowMs()) return null;
+            if (typeof record.sessionJson !== "string" || !record.sessionJson) return null;
             var value = safeJson(record.sessionJson);
             if (!value) fail("SESSION_JSON_INVALID");
             return value;
@@ -318,16 +329,17 @@ var ReclaimWhatsAppSheetsStore = (function () {
         }).slice(0, limit);
         candidates.forEach(function (record) {
           inspected++;
-          // A lease expiry does not prove the prior execution stopped. Release only
-          // to RETRYABLE; a future begin() must still reconcile by stable operation ID.
-          record.status = "RETRYABLE"; record.claimToken = ""; record.leaseExpiresAt = "";
+          // Expiry is not proof the prior execution stopped. Quarantine the claim;
+          // never automatically replay an event whose side effects are uncertain.
+          record.status = "RECONCILIATION_REQUIRED"; record.claimToken = ""; record.leaseExpiresAt = "";
           record.updatedAt = stamp; record.lastErrorCode = "LEASE_EXPIRED_REVIEW_REQUIRED";
           write("Events", record._row, record);
-          audit("RECONCILIATION", "", record.eventId, "RETRYABLE", "LEASE_EXPIRED_REVIEW_REQUIRED");
-          released++;
+          audit("RECONCILIATION", "", record.eventId, "MANUAL_REVIEW", "LEASE_EXPIRED_REVIEW_REQUIRED");
+          review++;
         });
         var duplicateOps = {};
-        rows("Registrations").slice(0, limit).forEach(function (record) {
+        var remaining = Math.max(0, limit - inspected);
+        rows("Registrations").slice(0, remaining).forEach(function (record) {
           inspected++;
           var key = record.organizationId + "|" + record.operationId;
           duplicateOps[key] = (duplicateOps[key] || 0) + 1;

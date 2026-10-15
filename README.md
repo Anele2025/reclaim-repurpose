@@ -63,7 +63,7 @@ All included sample rows are fictional test data. CSV templates do not enforce a
 - [x] **Stage 5 specification — Google-first digital tracker:** specification exists on the Stage 5 branch; no live Google resources or provider integration are implied.
 - [ ] **Stage 5.1 — Architecture baseline and implementation preparation:** implementation and validation changes are in unmerged PR #5.
 - [ ] **Stage 5.2 — Authenticated Apps Script backend foundation:** backend adapter foundation is in unmerged PR #6; live Google identity and storage behavior remain unverified.
-- [ ] **Stage 5.3 — Secure service and recovery:** implementation and synthetic tests are in unmerged PR #7; GitHub Actions passed for head 1281c2cdfad5aec893ec4fd83813506da2c32b4c. Live Google integration and security review remain pending.
+- [ ] **Stage 5.3 — Secure service and recovery:** implementation and synthetic tests are in unmerged PR #7; GitHub Actions run 38734843323 passed for head 45f91be849ec45d3b945ac23eef9fb8d4797ea54. Live Google integration and security review remain pending.
 - [ ] **Next — Stage 5.4 Google integration and source-packaging gate:** establish an authorized synthetic test project, verify Apps Script identity/permissions/locking, confirm the .js-to-Apps-Script deployment workflow, and exercise the service against a disposable workbook before AppSheet integration.
 - [ ] **Following — AppSheet dashboards:** configure the administrator dashboard and separately restricted organization-owner dashboards after server/data-source security is verified.
 - [ ] **Following — WhatsApp integration:** select and verify a provider, then implement signed webhook validation, replay protection, retries and failure monitoring.

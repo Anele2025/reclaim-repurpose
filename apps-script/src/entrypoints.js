@@ -25,6 +25,15 @@ function reclaimListCollectionRecords(request) {
 function reclaimRecordCollectionHandover(request) {
   return reclaimCreateService().recordCollectionHandover(request);
 }
+function reclaimCreateCustomerRegistration(request) {
+  return reclaimCreateService().createCustomerRegistration(request);
+}
+function reclaimGetCustomerRegistration(request) {
+  return reclaimCreateService().getCustomerRegistration(request);
+}
+function reclaimListCustomerRegistrations(request) {
+  return reclaimCreateService().listCustomerRegistrations(request);
+}
 function reclaimCreateService() {
   var props = PropertiesService.getScriptProperties();
   var repository = ReclaimSheetsRepository.create(SpreadsheetApp, props);

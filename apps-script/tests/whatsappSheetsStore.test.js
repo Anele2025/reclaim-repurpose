@@ -9,7 +9,7 @@ const source = fs.readFileSync(path.join(__dirname, "..", "src", "whatsappSheets
 const context = vm.createContext({ Object, Array, String, Number, Date, RegExp, Math, JSON, isFinite, parseInt });
 vm.runInContext(source, context, { filename: "whatsappSheetsStore.js" });
 
-function fakeSpreadsheet() {
+function fakeSpreadsheet(options = {}) {
   const tabs = new Map();
   function sheet(name) {
     const data = [];
@@ -20,11 +20,19 @@ function fakeSpreadsheet() {
             Array.from({ length: colCount }, (_, c) => (data[row - 1 + r] || [])[col - 1 + c] ?? ""));
         },
         setValues(values) {
+          if (options.failSetBeforeWriteTab === name) {
+            options.failSetBeforeWriteTab = "";
+            throw new Error("synthetic setValues failure before write");
+          }
           values.forEach((valuesRow, r) => {
             const index = row - 1 + r;
             if (!data[index]) data[index] = [];
             valuesRow.forEach((value, c) => { data[index][col - 1 + c] = value; });
           });
+          if (options.failSetAfterWriteTab === name) {
+            options.failSetAfterWriteTab = "";
+            throw new Error("synthetic acknowledgement lost after write");
+          }
         }
       };
     }
@@ -35,7 +43,13 @@ function fakeSpreadsheet() {
         data.forEach((row, index) => { if (row && row.some(value => value !== "" && value !== null && value !== undefined)) last = index + 1; });
         return last;
       },
-      appendRow(values) { data.push(values.slice()); },
+      appendRow(values) {
+        data.push(values.slice());
+        if (options.failAppendAfterWriteTab === name) {
+          options.failAppendAfterWriteTab = "";
+          throw new Error("synthetic append acknowledgement lost after write");
+        }
+      },
       _data: data
     };
   }
@@ -46,7 +60,7 @@ function fakeSpreadsheet() {
   };
 }
 function fixture(options = {}) {
-  const spreadsheet = fakeSpreadsheet();
+  const spreadsheet = fakeSpreadsheet(options);
   let clock = 1_800_000_000_000;
   let id = 0;
   const lock = { tryLock: () => !options.lockBusy, releaseLock: () => {} };
@@ -61,7 +75,7 @@ function fixture(options = {}) {
     batchLimit: 3
   });
   if (!options.skipInitialize) api.initialize();
-  return { api, spreadsheet, advance: ms => { clock += ms; } };
+  return { api, spreadsheet, options, advance: ms => { clock += ms; } };
 }
 const event = (store, id = "event-1", digest = "digest", org = "ORG_A") => store.eventStore("ACCOUNT_A").begin(id, digest, org);
 
@@ -178,4 +192,44 @@ test("schema mismatch fails closed", () => {
   const result = f.api.eventStore("ACCOUNT_A").begin("e1", "d1", "ORG_A");
   assert.equal(result.status, "UNAVAILABLE");
   assert.equal(result.code, "SCHEMA_MISMATCH_EVENTS");
+});
+
+
+test("session update failures are thrown and do not fabricate a durable write", () => {
+  const f = fixture();
+  const sessions = f.api.sessionStore("ACCOUNT_A");
+  sessions.put("ORG_A", "sender", { step: "NAME", expiresAt: 1_900_000_000_000 });
+  f.options.failSetBeforeWriteTab = "Sessions";
+  assert.throws(() => sessions.put("ORG_A", "sender", { step: "LOCATION", expiresAt: 1_900_000_000_000 }), /synthetic setValues failure/);
+  assert.equal(sessions.get("ORG_A", "sender").step, "NAME");
+});
+
+test("registration write with lost acknowledgement is safe to retry by stable IDs", () => {
+  const f = fixture({ failAppendAfterWriteTab: "Registrations" });
+  const store = f.api.registrationStore();
+  const request = { organizationId: "ORG_A", registrationId: "reg-lost-ack", operationId: "op-lost-ack",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", latitude: 0, longitude: 0 };
+  const uncertain = store.create(request);
+  assert.equal(uncertain.ok, false);
+  assert.equal(uncertain.durable, false);
+  assert.equal(uncertain.retryable, true);
+  const retry = store.create({ ...request });
+  assert.equal(retry.ok, true);
+  assert.equal(retry.replay, true);
+  assert.equal(f.spreadsheet.getSheetByName("Registrations").getLastRow(), 2);
+});
+
+test("event completion acknowledgement loss is detected as a completed replay on retry", () => {
+  const f = fixture();
+  const events = f.api.eventStore("ACCOUNT_A");
+  events.begin("lost-complete", "digest", "ORG_A");
+  f.options.failSetAfterWriteTab = "Events";
+  assert.throws(() => events.complete("lost-complete", "digest", "ORG_A", { ok: true, code: "CONTINUE" }), /acknowledgement lost/);
+  assert.equal(events.begin("lost-complete", "digest", "ORG_A").status, "REPLAY");
+});
+
+test("provider account scopes isolate event identity", () => {
+  const f = fixture();
+  assert.equal(f.api.eventStore("ACCOUNT_A").begin("same-id", "same-digest", "ORG_A").status, "NEW");
+  assert.equal(f.api.eventStore("ACCOUNT_B").begin("same-id", "same-digest", "ORG_A").status, "NEW");
 });

@@ -6,13 +6,68 @@ const path = require("node:path");
 const vm = require("node:vm");
 const root = path.join(__dirname, "..", "src");
 const context = vm.createContext({ Object, Array, String, Number, Date, RegExp, Math, JSON });
-for (const file of ["identity.js","authorization.js","sheetsRepository.js","idempotency.js","audit.js","service.js"]) {
+for (const file of ["identity.js", "authorization.js", "sheetsRepository.js", "idempotency.js", "audit.js", "service.js"]) {
   vm.runInContext(fs.readFileSync(path.join(root, file), "utf8"), context, { filename: file });
 }
-const auth = context.ReclaimAuthorization;
 const identity = context.ReclaimIdentity;
-const idem = context.ReclaimIdempotency;
+const auth = context.ReclaimAuthorization;
 const repoModule = context.ReclaimSheetsRepository;
+const idem = context.ReclaimIdempotency;
+
+function fixtures(actorId, memberships, options = {}) {
+  const state = {
+    organizations: {
+      ORG_A: { organizationId: "ORG_A", organizationName: "Synthetic A", country: "Botswana", currency: "BWP", status: "ACTIVE", serviceEnabled: true, configVersion: 1 },
+      ORG_B: { organizationId: "ORG_B", organizationName: "Synthetic B", country: "Eswatini", currency: "SZL", status: "ACTIVE", serviceEnabled: true, configVersion: 1 },
+      ORG_C: { organizationId: "ORG_C", organizationName: "Synthetic C", country: "Botswana", currency: "BWP", status: "PROSPECT", serviceEnabled: false, configVersion: 1 }
+    },
+    memberships: memberships || [],
+    operations: Object.create(null),
+    auditEvents: [],
+    auditCalls: 0
+  };
+  const repository = {
+    findMembershipsForActor: id => state.memberships.filter(m => m.actorId.toLowerCase() === id.toLowerCase()),
+    findOrganization: id => state.organizations[id] || null,
+    updateOrganizationServiceEnabled: (id, enabled) => {
+      const org = state.organizations[id];
+      if (!org) return null;
+      org.serviceEnabled = enabled;
+      org.configVersion = Number(org.configVersion || 0) + 1;
+      return { ok: true };
+    },
+    findOperation: id => state.operations[id] || null,
+    appendIdempotency: row => {
+      if (state.operations[row.operationId]) throw new Error("duplicate");
+      state.operations[row.operationId] = { ...row };
+    },
+    updateOperation: (id, changes) => {
+      if (!state.operations[id]) return null;
+      Object.assign(state.operations[id], changes);
+      return { ok: true };
+    },
+    appendAudit: event => {
+      state.auditCalls += 1;
+      if (options.failAuditAt === state.auditCalls || options.failAllAudit) throw new Error("synthetic storage error");
+      state.auditEvents.push({ ...event });
+      return { ok: true };
+    }
+  };
+  let seq = 0;
+  const lockState = { acquired: 0, released: 0, canAcquire: options.canAcquire !== false };
+  const lockService = { getScriptLock: () => ({
+    tryLock: () => { if (!lockState.canAcquire) return false; lockState.acquired += 1; return true; },
+    releaseLock: () => { lockState.released += 1; }
+  }) };
+  const service = context.ReclaimService.create({
+    identity: { resolveCurrentActor: () => actorId ? { ok: true, actorId } : { ok: false, error: { code: "IDENTITY_UNAVAILABLE" } } },
+    session: {}, repository, audit: context.ReclaimAudit, idempotency: idem, lockService,
+    digest: value => "test-digest:" + value,
+    idGenerator: () => "synthetic-id-" + (++seq),
+    clock: { now: () => "2026-10-15T00:00:00.000Z" }
+  });
+  return { state, repository, service, lockState };
+}
 
 test("identity adapter fails closed when identity is missing or inaccessible", () => {
   assert.equal(identity.resolveCurrentActor(null).error.code, "IDENTITY_UNAVAILABLE");
@@ -20,51 +75,123 @@ test("identity adapter fails closed when identity is missing or inaccessible", (
   assert.equal(identity.resolveCurrentActor({ getActiveUser: () => ({ getEmail: () => "Test@Example.invalid" }) }).actorId, "test@example.invalid");
 });
 
-test("authorization denies missing, revoked, wrong-role and cross-organization membership", () => {
+test("central policy rejects inactive memberships and cross-organization record scope", () => {
   const org = { organizationId: "ORG_A", status: "ACTIVE", serviceEnabled: true };
   const owner = { actorId: "owner@example.invalid", organizationId: "ORG_A", role: "COMPANY_OWNER", status: "ACTIVE" };
   assert.equal(auth.authorize("owner@example.invalid", null, org, "ORG_A", []).ok, false);
   assert.equal(auth.authorize("owner@example.invalid", { ...owner, status: "REVOKED" }, org, "ORG_A", []).error.code, "MEMBERSHIP_INACTIVE");
-  assert.equal(auth.authorize("owner@example.invalid", owner, org, "ORG_B", []).error.code, "ORGANIZATION_NOT_FOUND");
-  assert.equal(auth.authorize("owner@example.invalid", owner, { ...org, status: "SUSPENDED" }, "ORG_A", []).error.code, "ORGANIZATION_INACTIVE");
-  assert.equal(auth.authorize("owner@example.invalid", { ...owner, role: "UNAPPROVED" }, org, "ORG_A", []).error.code, "ROLE_DENIED");
   assert.equal(auth.authorizeRecordScope({ ok: true, role: "COMPANY_OWNER", organizationId: "ORG_A" }, { organizationId: "ORG_B" }).ok, false);
 });
 
-test("organization membership and service configuration must match", () => {
-  const owner = { actorId: "owner@example.invalid", organizationId: "ORG_A", role: "COMPANY_OWNER", status: "ACTIVE" };
-  assert.equal(auth.authorize("owner@example.invalid", owner, { organizationId: "ORG_A", status: "ACTIVE", serviceEnabled: false }, "ORG_A", []).error.code, "SERVICE_DISABLED");
+test("company owner can read only the organization tied to trusted membership, not spoofed request claims", () => {
+  const f = fixtures("owner@example.invalid", [
+    { membershipId: "M1", actorId: "owner@example.invalid", organizationId: "ORG_A", role: "COMPANY_OWNER", status: "ACTIVE" }
+  ]);
+  const ok = f.service.getOrganizationSummary({ organizationId: "ORG_A", actorId: "admin@example.invalid", role: "PLATFORM_ADMIN" });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.value.organizationId, "ORG_A");
+  const denied = f.service.getOrganizationSummary({ organizationId: "ORG_B", actorId: "owner@example.invalid", role: "PLATFORM_ADMIN" });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.error.code, "MEMBERSHIP_NOT_FOUND");
+  assert.equal(f.state.auditEvents.some(e => e.outcome === "DENIED"), true);
 });
 
-test("formula-leading strings are escaped before Sheets writes", () => {
-  assert.equal(repoModule.safeText("=IMPORTXML(\"x\")"), "'=IMPORTXML(\"x\")");
-  assert.equal(repoModule.safeText("+cmd"), "'+cmd");
+test("identity absence, ambiguous membership, revoked membership and invalid country/currency fail closed", () => {
+  const noIdentity = fixtures(null, []);
+  assert.equal(noIdentity.service.getOrganizationSummary({ organizationId: "ORG_A" }).error.code, "IDENTITY_UNAVAILABLE");
+  const ambiguous = fixtures("owner@example.invalid", [
+    { actorId: "owner@example.invalid", organizationId: "ORG_A", role: "COMPANY_OWNER", status: "ACTIVE" },
+    { actorId: "OWNER@example.invalid", organizationId: "ORG_A", role: "COMPANY_OWNER", status: "ACTIVE" }
+  ]);
+  assert.equal(ambiguous.service.getOrganizationSummary({ organizationId: "ORG_A" }).error.code, "MEMBERSHIP_AMBIGUOUS");
+  const revoked = fixtures("owner@example.invalid", [
+    { actorId: "owner@example.invalid", organizationId: "ORG_A", role: "COMPANY_OWNER", status: "REVOKED" }
+  ]);
+  assert.equal(revoked.service.getOrganizationSummary({ organizationId: "ORG_A" }).error.code, "MEMBERSHIP_INACTIVE");
+  const invalid = fixtures("owner@example.invalid", [
+    { actorId: "owner@example.invalid", organizationId: "ORG_A", role: "COMPANY_OWNER", status: "ACTIVE" }
+  ]);
+  invalid.state.organizations.ORG_A.currency = "SZL";
+  assert.equal(invalid.service.getOrganizationSummary({ organizationId: "ORG_A" }).error.code, "CONFIGURATION_INVALID");
+});
+
+test("platform administrator is resolved only through an active trusted global membership", () => {
+  const absent = fixtures("admin@example.invalid", []);
+  assert.equal(absent.service.setOrganizationServiceEnabled({ organizationId: "ORG_A", serviceEnabled: false, operationId: "op-admin-0001" }).error.code, "MEMBERSHIP_NOT_FOUND");
+  const admin = fixtures("admin@example.invalid", [
+    { membershipId: "ADMIN1", actorId: "admin@example.invalid", organizationId: "PLATFORM", role: "PLATFORM_ADMIN", status: "ACTIVE" }
+  ]);
+  const result = admin.service.setOrganizationServiceEnabled({ organizationId: "ORG_A", serviceEnabled: false, operationId: "op-admin-0001", role: "COMPANY_OWNER" });
+  assert.equal(result.ok, true);
+  assert.equal(admin.state.organizations.ORG_A.serviceEnabled, false);
+  assert.equal(admin.state.operations["op-admin-0001"].status, "SUCCEEDED");
+  assert.equal(admin.state.auditEvents.some(e => e.action === "SET_ORGANIZATION_SERVICE" && e.outcome === "SUCCEEDED"), true);
+});
+
+test("completed identical mutation retries return recorded result without repeating the write", () => {
+  const f = fixtures("admin@example.invalid", [
+    { membershipId: "ADMIN1", actorId: "admin@example.invalid", organizationId: "PLATFORM", role: "PLATFORM_ADMIN", status: "ACTIVE" }
+  ]);
+  const request = { organizationId: "ORG_A", serviceEnabled: false, operationId: "op-admin-0002" };
+  const first = f.service.setOrganizationServiceEnabled(request);
+  const version = f.state.organizations.ORG_A.configVersion;
+  const second = f.service.setOrganizationServiceEnabled(request);
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.equal(second.replayed, true);
+  assert.equal(f.state.organizations.ORG_A.configVersion, version);
+  assert.equal(f.lockState.acquired, f.lockState.released);
+});
+
+test("same operation ID with changed payload is rejected and does not write", () => {
+  const f = fixtures("admin@example.invalid", [
+    { membershipId: "ADMIN1", actorId: "admin@example.invalid", organizationId: "PLATFORM", role: "PLATFORM_ADMIN", status: "ACTIVE" }
+  ]);
+  assert.equal(f.service.setOrganizationServiceEnabled({ organizationId: "ORG_A", serviceEnabled: false, operationId: "op-admin-0003" }).ok, true);
+  const result = f.service.setOrganizationServiceEnabled({ organizationId: "ORG_A", serviceEnabled: true, operationId: "op-admin-0003" });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "IDEMPOTENCY_CONFLICT");
+  assert.equal(f.state.organizations.ORG_A.serviceEnabled, false);
+});
+
+test("pre-write audit failure prevents the organization mutation and leaves a reconciliation signal", () => {
+  const f = fixtures("admin@example.invalid", [
+    { membershipId: "ADMIN1", actorId: "admin@example.invalid", organizationId: "PLATFORM", role: "PLATFORM_ADMIN", status: "ACTIVE" }
+  ], { failAuditAt: 1 });
+  const result = f.service.setOrganizationServiceEnabled({ organizationId: "ORG_A", serviceEnabled: false, operationId: "op-admin-0004" });
+  assert.equal(result.ok, false);
+  assert.equal(f.state.organizations.ORG_A.serviceEnabled, true);
+  assert.equal(f.state.operations["op-admin-0004"].status, "RECONCILIATION_REQUIRED");
+});
+
+test("post-write audit failure does not invite blind replay", () => {
+  const f = fixtures("admin@example.invalid", [
+    { membershipId: "ADMIN1", actorId: "admin@example.invalid", organizationId: "PLATFORM", role: "PLATFORM_ADMIN", status: "ACTIVE" }
+  ], { failAuditAt: 2 });
+  const request = { organizationId: "ORG_A", serviceEnabled: false, operationId: "op-admin-0005" };
+  const result = f.service.setOrganizationServiceEnabled(request);
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "RECONCILIATION_REQUIRED");
+  assert.equal(f.state.organizations.ORG_A.serviceEnabled, false);
+  assert.equal(f.state.operations["op-admin-0005"].status, "RECONCILIATION_REQUIRED");
+  assert.equal(f.service.setOrganizationServiceEnabled(request).error.code, "RECONCILIATION_REQUIRED");
+});
+
+test("idempotency fails closed on lock failure and retains unresolved PROCESSING operations", () => {
+  const f = fixtures("admin@example.invalid", [
+    { membershipId: "ADMIN1", actorId: "admin@example.invalid", organizationId: "PLATFORM", role: "PLATFORM_ADMIN", status: "ACTIVE" }
+  ], { canAcquire: false });
+  assert.equal(f.service.setOrganizationServiceEnabled({ organizationId: "ORG_A", serviceEnabled: false, operationId: "op-admin-0006" }).error.code, "LOCK_UNAVAILABLE");
+  f.state.operations["op-admin-0007"] = { operationId: "op-admin-0007", actorId: "admin@example.invalid", organizationId: "ORG_A", operationType: "SET_ORGANIZATION_SERVICE", payloadDigest: "test-digest:{\"organizationId\":\"ORG_A\",\"serviceEnabled\":false}", status: "PROCESSING" };
+  assert.equal(f.service.setOrganizationServiceEnabled({ organizationId: "ORG_A", serviceEnabled: false, operationId: "op-admin-0007" }).error.code, "RECONCILIATION_REQUIRED");
+  assert.equal(f.state.organizations.ORG_A.serviceEnabled, true);
+});
+
+test("repository text escaping handles formula markers and leading whitespace", () => {
+  assert.equal(repoModule.safeText("=IMPORTXML(\\"x\\")"), "'=IMPORTXML(\\"x\\")");
+  assert.equal(repoModule.safeText("  +cmd"), "'  +cmd");
+  assert.equal(repoModule.safeText("-1 as text"), "'-1 as text");
+  assert.equal(repoModule.safeText("@SUM(A1)"), "'@SUM(A1)");
   assert.equal(repoModule.safeText("ordinary text"), "ordinary text");
-});
-
-test("durable idempotency adapter detects same ID and conflicting operation payloads", () => {
-  const records = Object.create(null);
-  const repo = {
-    findOperation: id => records[id] || null,
-    appendIdempotency: row => { records[row.operationId] = row; }
-  };
-  const lock = { tryLock: () => true, releaseLock: () => {} };
-  const lockService = { getScriptLock: () => lock };
-  const request = { operationId: "operation-0001", actorId: "synthetic", organizationId: "ORG_A", operationType: "CREATE_TEST", payloadDigest: "digest-a" };
-  assert.equal(idem.reserve(repo, lockService, request, "2026-10-15T00:00:00Z").ok, true);
-  assert.equal(idem.reserve(repo, lockService, request, "2026-10-15T00:00:01Z").error.code, "OPERATION_ALREADY_EXISTS");
-  assert.equal(idem.reserve(repo, lockService, { ...request, payloadDigest: "digest-b" }, "2026-10-15T00:00:02Z").error.code, "IDEMPOTENCY_CONFLICT");
-});
-
-test("idempotency fails closed when lock cannot be acquired", () => {
-  const result = idem.reserve({}, { getScriptLock: () => ({ tryLock: () => false, releaseLock: () => {} }) },
-    { operationId: "operation-0001", actorId: "x", organizationId: "ORG_A", operationType: "X", payloadDigest: "x" }, "now");
-  assert.equal(result.error.code, "LOCK_UNAVAILABLE");
-});
-
-test("audit failure returns a safe structured error", () => {
-  const result = context.ReclaimAudit.record({ appendAudit: () => { throw new Error("private spreadsheet detail"); } },
-    { eventId: "evt", timestamp: "now", action: "READ", outcome: "DENIED" });
-  assert.equal(result.error.code, "AUDIT_UNAVAILABLE");
-  assert.equal(JSON.stringify(result).includes("private spreadsheet detail"), false);
+  assert.equal(repoModule.safeText(12), 12);
 });

@@ -25,6 +25,7 @@ MODULE_ORDER = (
     "sheetsRepository.js",
     "audit.js",
     "idempotency.js",
+    "whatsappRegistration.js",
     "service.js",
     "entrypoints.js",
 )

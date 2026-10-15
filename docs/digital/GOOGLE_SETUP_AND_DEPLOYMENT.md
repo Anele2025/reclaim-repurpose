@@ -118,3 +118,29 @@ See `docs/digital/STAGE_5_4_GOOGLE_INTEGRATION_AUDIT.md` for the current audit a
 Stage 5.5 adds adversarial repository regression tests and a synthetic-only live Google test runbook at [Stage 5.5 live Google integration verification](STAGE_5_5_LIVE_GOOGLE_INTEGRATION_VERIFICATION.md). Run all local checks, including `node --test apps-script/tests/*.test.js`. These tests use local fixtures/test doubles; they are not live Google tests.
 
 The live gate remains **BLOCKED / NOT VERIFIED** until an authorized dedicated Apps Script project and disposable synthetic workbook are tested using separately authenticated synthetic administrator and company-owner accounts. Verify identity in the exact intended execution mode, cross-organization denials, direct workbook permissions, lock contention, audit failure and recovery before AppSheet integration. Do not use the production workbook or share the master workbook with company owners. Do not claim a live test passed unless observed and recorded.
+
+
+## Stage 5.9 — WhatsApp customer-registration workflow boundary
+
+**Status: provider-independent workflow implemented for automated testing; not a live WhatsApp integration.** No WhatsApp provider is selected in this repository increment. There is deliberately no public Apps Script `doPost` endpoint and no change to the restricted owner-authenticated entrypoints.
+
+- `whatsappRegistration.js` provides a provider-independent state machine for collecting a customer name, a provider-supplied sender identifier, a WhatsApp location attachment with finite latitude/longitude, an optional short address description, and explicit confirmation.
+- A text address never substitutes for coordinates. Invalid coordinates are rejected. A successful customer message says registration was saved only when the injected persistence adapter returns `ok: true` and `durable: true`; it does not claim that a collection was scheduled.
+- The workflow requires injected adapters for raw-request authentication, provider payload parsing, trusted organization routing, event idempotency, session storage, and durable registration creation. Missing adapters fail closed. It does not call the owner-authenticated `reclaimCreateCustomerRegistration` entrypoint and does not accept customer-supplied actor IDs, roles, or organization IDs as authority.
+- The company route is resolved from the trusted request/configuration adapter, not from the event body. If that adapter cannot identify a single participating company, processing stops with `COMPANY_ROUTE_UNAVAILABLE`.
+- Provider event IDs are claimed with a payload digest. Identical replays are ignored and conflicting reuse of an event ID is rejected. The production adapter must make event claiming atomic and durable, scope the key to the provider's documented event identity, and define retry/reconciliation behavior.
+- Session storage is an injected boundary. The workflow sets a 24-hour expiry and scopes sessions by organization and sender; a production store must enforce expiry, durable updates, safe concurrency, and cleanup of abandoned sessions. The current automated tests use in-memory adapters only.
+- The workflow returns response messages as structured results. A selected provider adapter must send those responses according to provider API requirements, respect rate limits and delivery failures, and avoid acknowledging successful registration until durable storage has completed.
+
+### Required decisions before live deployment
+
+1. Select the WhatsApp provider (for example, Meta WhatsApp Cloud API or Twilio) and document its exact webhook signature, verification challenge, payload, retry, and outbound-message requirements.
+2. Implement and review the provider-specific raw-body signature verifier and parser. The `verifyWebhook` callback must authenticate the original request bytes and relevant headers before payload processing; a boolean supplied by an untrusted caller is not sufficient.
+3. Configure an administrator-controlled mapping from the provider's receiving business/phone-number identity to one active participating organization. Never route from customer message text or an untrusted organization ID.
+4. Implement durable, atomic event-deduplication and conversation-session adapters, including concurrency and recovery behavior.
+5. Implement a trusted, auditable backend adapter for creating a customer registration. It must preserve Stage 5.8 field validation, organization isolation, stable operation IDs, audit, and idempotency without impersonating a company owner or exposing owner-only methods publicly.
+6. Verify the deployment identity and permissions, configure secrets outside source control, test with a synthetic provider account, and only then perform a separately authorized deployment.
+
+### Stage 5.9 verification boundary
+
+Tests exercise the provider-independent state machine with synthetic in-memory adapters. They do not verify an actual provider signature, provider webhook challenge, outbound WhatsApp delivery, atomic persistence under concurrent Apps Script executions, live Google Sheets, Apps Script deployment, or production credentials. A passing CI run is not evidence of live integration or production readiness.

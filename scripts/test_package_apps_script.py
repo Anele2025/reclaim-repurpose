@@ -60,6 +60,8 @@ class PackageAppsScriptTests(unittest.TestCase):
             self.assertIn("function reclaimCreateCustomerRegistration(", code)
             self.assertIn("function reclaimGetCustomerRegistration(", code)
             self.assertIn("function reclaimListCustomerRegistrations(", code)
+            self.assertIn("var ReclaimWhatsAppRegistration =", code)
+            self.assertNotIn("function doPost(", code)
             self.assertNotIn("function doGet(", code)
             self.assertNotIn("node:test", code)
             self.assertNotIn("require(", code)

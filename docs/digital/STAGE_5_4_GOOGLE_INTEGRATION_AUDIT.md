@@ -77,7 +77,7 @@ Minimum test-project access model:
 
 ## 6. Verification status
 
-**Repository-level implementation:** packaging gate and tests added; final automated results must be taken from the Stage 5.4 workflow run against its final head SHA.
+**Repository-level implementation:** packaging gate and tests added. GitHub Actions run [38737015687](https://github.com/Anele2025/reclaim-repurpose/actions/runs/38737015687) completed successfully for head SHA `a23c624de545c80fba297c9863bcb14738ccbd21`. The job passed the Node.js 22 suite, package unit tests, deterministic package build, generated-code checks, and Stage 4 validator.
 
 **Live Google integration:** **BLOCKED / NOT VERIFIED.** No authorized live Apps Script project or disposable Google spreadsheet was available during this repository audit. No actual Google identity, spreadsheet permission, live lock/concurrency, quota, or deployment test is claimed.
 

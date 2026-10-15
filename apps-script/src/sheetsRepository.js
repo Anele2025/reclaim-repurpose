@@ -68,6 +68,19 @@ var ReclaimSheetsRepository = (function () {
       if (required && required.some(function (key) { return record[key] === undefined || record[key] === null || String(record[key]).trim() === ""; })) {
         throw new Error("REQUIRED_FIELD_MISSING");
       }
+      if (name === "Organizations") {
+        var expectedCurrency = record.country === "Botswana" ? "BWP" : record.country === "Eswatini" ? "SZL" : "";
+        if (!expectedCurrency || record.currency !== expectedCurrency) throw new Error("COUNTRY_CURRENCY_MISMATCH");
+        if (["PROSPECT","ACTIVE","PAUSED","SUSPENDED","ARCHIVED"].indexOf(record.status) < 0) throw new Error("INVALID_ORGANIZATION_STATUS");
+        if (typeof record.serviceEnabled !== "boolean" || !isFinite(Number(record.configVersion)) || Number(record.configVersion) < 1 || Math.floor(Number(record.configVersion)) !== Number(record.configVersion)) throw new Error("INVALID_ORGANIZATION_CONFIGURATION");
+      }
+      if (name === "Memberships") {
+        if (["PLATFORM_ADMIN","COMPANY_OWNER"].indexOf(record.role) < 0) throw new Error("INVALID_MEMBERSHIP_ROLE");
+        if (["INVITED","ACTIVE","SUSPENDED","REVOKED"].indexOf(record.status) < 0) throw new Error("INVALID_MEMBERSHIP_STATUS");
+        if (record.role === "PLATFORM_ADMIN" && record.organizationId && record.organizationId !== "PLATFORM") throw new Error("INVALID_ADMIN_SCOPE");
+      }
+      if (name === "Idempotency" && ["PROCESSING","SUCCEEDED","FAILED_RETRYABLE","RECONCILIATION_REQUIRED"].indexOf(record.status) < 0) throw new Error("INVALID_OPERATION_STATUS");
+      if (name === "AuditEvents" && ["SUCCEEDED","DENIED","ATTEMPTED","FAILED","REPLAYED","RECOVERED"].indexOf(record.outcome) < 0) throw new Error("INVALID_AUDIT_OUTCOME");
       var existing = stable ? findAll(name, stable, record[stable]) : [];
       if (existing.length) throw new Error("DUPLICATE_STABLE_ID");
       var sheet = getSheet(name);

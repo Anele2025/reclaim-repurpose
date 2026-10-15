@@ -154,6 +154,8 @@ The provider-independent registration workflow now requires explicit event lifec
 
 **This is an adapter contract, not a production durable-store implementation.** The current tests use in-memory synthetic adapters. They do not provide cross-execution locking, durable leases, atomic event/session transactions, or crash recovery across independent Google Sheets writes. A production adapter must provide atomic event claiming and completion, expiry/lease recovery for abandoned PROCESSING claims, safe per-sender locking, and a stable idempotency key for registration persistence. It must also recover safely if registration persistence succeeds but event completion or outbound message delivery fails. Do not deploy with the test adapters.
 
+The confirmation transition now allocates and persists a registration ID and operation ID before attempting registration storage. Retries reuse those same identifiers instead of generating a new idempotency key. A workflow-level persistence failure is returned as an overall retryable failure, not as an overall successful webhook result. This protects the retry contract only when the eventual registration adapter actually enforces idempotency for the stable operation ID.
+
 The session marker reduces duplicate state transitions after a successful session write, but it cannot make two separate stores transactional. In particular, if registration persistence succeeds and the event-completion write fails, the event remains uncertain until the production adapter's recovery process reconciles it against the stable registration operation ID. Do not retry that submission with newly generated IDs or claim end-to-end exactly-once processing without verified idempotent storage.
 
 ### Verification boundary

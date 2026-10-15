@@ -1,4 +1,4 @@
-# Stage 5.6 — Collection-record workflow contract
+# Stage 5.7 — Collection-site registry and collection-record workflow contract
 
 ## Status and boundary
 
@@ -6,10 +6,23 @@ This change adds the first server-side operational collection workflow to the ex
 
 A collection is initially `RECORDED`. A separate authorized handover operation may change it to `HANDED_OVER` when a destination partner and handover reference are recorded. Neither status proves that the material was independently verified as recycled.
 
+## Collection-site registry
+
+Each organization registers operational sites before recording collections. Site creation requires `organizationId`, a stable unique `siteId`, `siteName` (1–120 characters), `country` (`Botswana` or `Eswatini`, matching the organization country), and an `operationId`; `locationDescription` is optional and limited to 240 characters. The server assigns timestamps, actor references, and `ACTIVE` status. Site IDs are unique across the registry. Owners can retrieve/list only their organization sites, update descriptive fields, and deactivate a site without deleting it. Every mutation uses the existing idempotency and audit layer.
+
+An `ACTIVE` site may receive new collection records only when its stored `organizationId` matches the authenticated owner organization. Unknown, inactive, and cross-organization site IDs produce the same safe `SITE_NOT_AVAILABLE` response during collection creation. Deactivation blocks new records but does not rewrite historical records; their original `siteId` remains unchanged and records remain readable under normal organization authorization.
+
+The exact `CollectionSites` headers are: `siteId, organizationId, siteName, country, locationDescription, status, createdAt, updatedAt, createdBy, updatedBy`. Do not create or migrate a live sheet automatically. Add this sheet to the dedicated synthetic spreadsheet only after reviewing its exact schema.
+
 ## Apps Script service entrypoints
 
 The packaged Apps Script project exposes these function-level entrypoints:
 
+- `reclaimCreateCollectionSite(request)`
+- `reclaimGetCollectionSite(request)`
+- `reclaimListCollectionSites(request)`
+- `reclaimUpdateCollectionSite(request)`
+- `reclaimDeactivateCollectionSite(request)`
 - `reclaimRecordCollection(request)`
 - `reclaimGetCollectionRecord(request)`
 - `reclaimListCollectionRecords(request)`
@@ -44,7 +57,11 @@ Required: `organizationId`, `collectionId`, `destinationPartnerId`, `handoverRef
 
 ## Persistence and recovery
 
-The `CollectionRecords` sheet schema is defined in `ReclaimSheetsRepository.schemas`. The adapter validates the exact header set, validates record fields and stable IDs, escapes formula-like text, and provides organization-scoped listing. Mutations use the existing Apps Script script lock and idempotency table. If storage or post-write audit outcome is uncertain, the operation returns a reconciliation-required error rather than claiming success or blindly replaying.
+The `CollectionSites` and `CollectionRecords` sheet schemas are defined in `ReclaimSheetsRepository.schemas`. The adapter validates the exact header set, validates record fields and stable IDs, escapes formula-like text, and provides organization-scoped listing. Mutations use the existing Apps Script script lock and idempotency table. If storage or post-write audit outcome is uncertain, the operation returns a reconciliation-required error rather than claiming success or blindly replaying.
+
+## Future AppSheet boundary
+
+These service entrypoints are available for a future reviewed integration. No AppSheet app, view, security filter, or authenticated invocation route has been created or verified by this change. When configured, the owner interface must preserve server-side identity and membership checks; do not expose the underlying master spreadsheet directly to company owners.
 
 ## Remaining integration requirements
 

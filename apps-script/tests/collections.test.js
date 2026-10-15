@@ -186,11 +186,11 @@ test("Sheets repository validates schema, enforces collection constraints and es
   assert.throws(() => repoModule.create(fakeSpreadsheet({}), { getProperty: () => "synthetic-sheet-id" }).findCollectionRecord("COLL_1"), /REQUIRED_SHEET_MISSING/);
   assert.throws(() => repoModule.create(fakeSpreadsheet({ CollectionRecords: fakeSheet(["collectionId","wrong"]) }), { getProperty: () => "synthetic-sheet-id" }).findCollectionRecord("COLL_1"), /SCHEMA_MISMATCH/);
   repository.appendCollectionRecord({
-    collectionId:"COLL_1", organizationId:"ORG_A", siteId:"=IMPORTXML(\"x\")", collectedAt:"2026-10-14T10:15:00+02:00",
-    materialCategory:"PLASTIC", quantity:3, unit:"kg", collectorRef:"", destinationPartnerId:"", handoverRef:"", evidenceRef:"",
+    collectionId:"COLL_1", organizationId:"ORG_A", siteId:"SITE_1", collectedAt:"2026-10-14T10:15:00+02:00",
+    materialCategory:"PLASTIC", quantity:3, unit:"kg", collectorRef:"=IMPORTXML(\"x\")", destinationPartnerId:"", handoverRef:"", evidenceRef:"",
     status:"RECORDED", createdAt:"now", updatedAt:"now", createdBy:"owner-a@example.invalid", operationId:"collect-op-0001"
   });
-  assert.equal(sheets.CollectionRecords._grid[1][2], "'=IMPORTXML(\"x\")");
+  assert.equal(sheets.CollectionRecords._grid[1][7], "'=IMPORTXML(\"x\")");
   assert.equal(repository.findCollectionRecord("COLL_1").status, "RECORDED");
   assert.equal(repository.findCollectionRecordsForOrganization("ORG_B", 10).length, 0);
   assert.throws(() => repository.appendCollectionRecord({

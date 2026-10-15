@@ -70,3 +70,17 @@ A documentation PR cannot pass market validation by itself. If evidence is unava
 - **STOP:** abandon the current model/scope where evidence shows no workable route, unacceptable risk, or economics that cannot realistically be repaired.
 
 Related templates: [prospects](../../templates/validation/customer_site_prospects.csv), [interviews](../../templates/validation/customer_interviews.csv), [receivers](../../templates/validation/recovery_partner_register.csv), [site permissions](../../templates/validation/site_permissions.csv), [country requirements](../../templates/validation/country_requirements_register.csv), [evidence index](../../templates/validation/evidence_register.csv), and [decision log](../../templates/validation/validation_decisions.csv).
+
+
+## Controlled status values for the registers
+
+Use these values consistently; do not invent new status spellings without updating the guide and validator together.
+
+- Prospects: ContactPermissionStatus = NOT_CHECKED, PUBLIC_CHANNEL_ONLY, CONSENTED, NO_PERMISSION, NOT_APPLICABLE. ValidationStatus = UNASSESSED, CONTACTED, INTERVIEWED, FOLLOW_UP, QUALIFIED_FOR_REVIEW, NOT_SUITABLE, CLOSED. SitePermissionStatus uses the values in the site permission guide.
+- Interviews: ConsentToRecordNotes = YES, NO, NOT_ASKED. ValidationOutcome = GENERAL_INTEREST, STATED_WILLINGNESS_TO_PAY, CONDITIONAL_OFFER, DOCUMENTED_COMMITMENT, PAID_TRANSACTION, NO_INTEREST, UNRESOLVED.
+- Recovery partners: ContactStatus = NOT_CONTACTED, CONTACTED, AWAITING_RESPONSE, TERMS_RECEIVED, CONDITIONS_VERIFIED, NOT_ACCEPTING, UNRESOLVED. CommercialStatus = UNKNOWN, NO_QUOTE, QUOTE_RECEIVED, CONDITIONAL, AGREEMENT_DOCUMENTED, NO_AGREEMENT.
+- Country requirements: Status = CONFIRMED, POTENTIALLY_APPLICABLE, NOT_APPLICABLE_JUSTIFIED, UNRESOLVED. CONFIRMED means applicability to the described scope was checked, not merely that a law exists.
+- Evidence quality: UNTESTED_ASSUMPTION, UNVERIFIED_LEAD, SELF_REPORTED, DOCUMENTED_THIRD_PARTY, CORROBORATED, OBSERVED_TRANSACTION_OR_RESULT.
+- Decisions: PROCEED, REVISE, PAUSE, STOP.
+
+Use blank fields for unknown values rather than silently defaulting them. For a NOT_APPLICABLE permission, include the required rationale and source reference.

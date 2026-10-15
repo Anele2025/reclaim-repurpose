@@ -40,6 +40,9 @@ REQUIRED_ENTRYPOINTS = (
     "reclaimGetCollectionRecord",
     "reclaimListCollectionRecords",
     "reclaimRecordCollectionHandover",
+    "reclaimCreateCustomerRegistration",
+    "reclaimGetCustomerRegistration",
+    "reclaimListCustomerRegistrations",
 )
 FORBIDDEN_PATTERNS = (
     (re.compile(r"\brequire\s*\("), "CommonJS require() is not supported in the Apps Script package"),

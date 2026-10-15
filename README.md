@@ -5,7 +5,7 @@
 
 RECLAIM & REPURPOSE is being developed as a Southern African circular-economy initiative focused on helping communities and organizations recover useful materials, reduce avoidable waste, and measure environmental and economic outcomes. Initial target countries are **Botswana and Eswatini**.
 
-> **Current status (Stage 5.3 review branch):** backend authorization, audit enforcement, and recoverable mutation processing are under implementation review. This branch is not merged or deployed. Google Sheets, Apps Script, AppSheet, WhatsApp provider integration, and production APIs are not claimed to be live.
+> **Current status (Stage 5.4 review branch):** Stage 5.3 backend authorization, audit, and recoverable mutation code is under review in PR #7. Stage 5.4 adds deterministic Apps Script packaging and manifest/CI validation in a new unmerged branch. No live Google project, workbook, AppSheet app, WhatsApp provider integration, or production API is claimed to be deployed.
 
 ## Purpose
 
@@ -63,8 +63,8 @@ All included sample rows are fictional test data. CSV templates do not enforce a
 - [x] **Stage 5 specification — Google-first digital tracker:** specification exists on the Stage 5 branch; no live Google resources or provider integration are implied.
 - [ ] **Stage 5.1 — Architecture baseline and implementation preparation:** implementation and validation changes are in unmerged PR #5.
 - [ ] **Stage 5.2 — Authenticated Apps Script backend foundation:** backend adapter foundation is in unmerged PR #6; live Google identity and storage behavior remain unverified.
-- [ ] **Stage 5.3 — Secure service and recovery:** implementation and synthetic tests are in unmerged PR #7; GitHub Actions run 38735126381 passed for head 3cb6390cfd6650c6b5746bafe15216eec65179fe. Live Google integration and security review remain pending.
-- [ ] **Next — Stage 5.4 Google integration and source-packaging gate:** establish an authorized synthetic test project, verify Apps Script identity/permissions/locking, confirm the .js-to-Apps-Script deployment workflow, and exercise the service against a disposable workbook before AppSheet integration.
+- [ ] **Stage 5.3 — Secure service and recovery:** implementation and synthetic tests are in unmerged PR #7. Pull-request CI run [38735236829](https://github.com/Anele2025/reclaim-repurpose/actions/runs/38735236829) and push run [38735232465](https://github.com/Anele2025/reclaim-repurpose/actions/runs/38735232465) passed for head `0096aafb73e8bdcda761b889fbe835a75e3cbf5d`. Live Google integration and security review remain pending.
+- [ ] **Stage 5.4 — Google source packaging and integration readiness:** deterministic package builder, explicit manifest scopes, synthetic package tests, and CI checks are being reviewed in the Stage 5.4 pull request. Live Google identity, workbook permissions, locking, and deployment remain unverified.
 - [ ] **Following — AppSheet dashboards:** configure the administrator dashboard and separately restricted organization-owner dashboards after server/data-source security is verified.
 - [ ] **Following — WhatsApp integration:** select and verify a provider, then implement signed webhook validation, replay protection, retries and failure monitoring.
 - [ ] **Physical pilot gate:** begin only after applicable legal, site, safety, customer, and receiving-partner requirements are evidenced as satisfied.

@@ -78,3 +78,34 @@ python scripts/validate_stage4.py
 Disable the test deployment or remove its invocation permissions; preserve audit evidence. Restore the previous source revision using version control. Do not delete operational records to roll back code. Rotate/revoke credentials if exposure is suspected.
 
 No Google deployment, AppSheet app, WhatsApp provider, QR service, GPS flow, payment gateway, or production monitoring has been created by these repository changes.
+
+
+## Stage 5.4 — reproducible source packaging and integration gate
+
+Stage 5.4 adds a deterministic repository packaging command. The modular files under `apps-script/src/` are kept as plain global JavaScript source for tests; the packager concatenates them in a declared order into one `Code.gs` because Apps Script projects do not load this repository's Node.js test harness. The generated bundle includes only `Code.gs` and `appsscript.json`.
+
+Run from the repository root:
+
+```sh
+python -m unittest scripts.test_package_apps_script
+python scripts/package_apps_script.py
+node --test apps-script/tests/*.test.js
+python scripts/validate_stage4.py
+```
+
+Output: `dist/apps-script/Code.gs` and `dist/apps-script/appsscript.json`. The command prepares files only. It does not authenticate to Google, import a project, deploy code, or verify real service behavior. CI must run the packaging gate and the existing Node.js 22 and Stage 4 checks.
+
+The manifest now explicitly declares these scopes:
+
+- `https://www.googleapis.com/auth/spreadsheets`
+- `https://www.googleapis.com/auth/userinfo.email`
+
+These scopes support the current Sheets adapter and active-user email check. Reassess them if functionality changes; do not add broader scopes without a documented need. The packager fails if the manifest uses a scope outside its reviewed allow-list.
+
+### Live Google test remains blocked until an authorized environment exists
+
+Use only a dedicated Apps Script test project and disposable synthetic spreadsheet. Set Script Property `RECLAIM_SPREADSHEET_ID` in that test project; never commit the spreadsheet ID or credentials. Import the generated package and verify the exact intended execution mode using synthetic administrator and company-owner accounts. The identity adapter denies requests when `Session.getActiveUser().getEmail()` is empty, but mocked tests cannot prove that this email will be available for every account and deployment configuration.
+
+Restrict direct workbook permissions independently. A script's application-level authorization does not protect a workbook from users who already have direct access. Test cross-organization access, direct workbook access, schema errors, audit failure, repeated operations, locking, and uncertain outcomes before considering AppSheet integration.
+
+See `docs/digital/STAGE_5_4_GOOGLE_INTEGRATION_AUDIT.md` for the current audit and manual acceptance checklist. Live Google identity, workbook permissions, locking/concurrency, quotas, and deployment security remain **NOT VERIFIED** until tested against real authorized Google services.

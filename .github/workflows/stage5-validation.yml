@@ -7,12 +7,15 @@ on:
       - "docs/digital/**"
       - "README.md"
       - "scripts/validate_stage4.py"
+      - "scripts/package_apps_script.py"
+      - "scripts/test_package_apps_script.py"
       - ".github/workflows/stage5-validation.yml"
   push:
     branches:
       - stage-5-working-mvp
       - stage-5-2-authenticated-sheets-backend
       - stage-5-3-secure-recoverable-service
+      - stage-5-4-google-integration-packaging
 
 jobs:
   pure-validation:
@@ -30,5 +33,18 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.x"
+      - name: Test Apps Script package gate
+        run: python -m unittest scripts.test_package_apps_script
+      - name: Build deterministic Apps Script package
+        run: python scripts/package_apps_script.py
+      - name: Validate generated package contents
+        run: |
+          test -s dist/apps-script/Code.gs
+          test -s dist/apps-script/appsscript.json
+          test "$(find dist/apps-script -maxdepth 1 -type f | wc -l)" -eq 2
+          node --check < dist/apps-script/Code.gs
+          ! grep -Eq 'require|module\.exports|function doGet\(|function doPost\(' dist/apps-script/Code.gs
+          grep -q 'function reclaimGetMyOrganizationSummary(' dist/apps-script/Code.gs
+          grep -q 'function reclaimSetOrganizationServiceEnabled(' dist/apps-script/Code.gs
       - name: Validate Stage 4 templates and links
         run: python scripts/validate_stage4.py

@@ -21,7 +21,7 @@ function fixtures(actorId = "owner-a@example.invalid", memberships, options = {}
       ORG_B: { organizationId: "ORG_B", organizationName: "Synthetic B", country: "Eswatini", currency: "SZL", status: "ACTIVE", serviceEnabled: true, configVersion: 1 }
     },
     memberships: memberships || [{ membershipId: "M-A", actorId: "owner-a@example.invalid", organizationId: "ORG_A", role: "COMPANY_OWNER", status: "ACTIVE" }],
-    operations: Object.create(null), collections: Object.create(null), auditEvents: [], auditCalls: 0
+    operations: Object.create(null), collections: Object.create(null), sites: { SITE_1: { siteId:"SITE_1", organizationId:"ORG_A", siteName:"Synthetic Site A", country:"Botswana", locationDescription:"Test location", status:"ACTIVE", createdAt:"2026-10-15T00:00:00.000Z", updatedAt:"2026-10-15T00:00:00.000Z", createdBy:"owner-a@example.invalid", updatedBy:"owner-a@example.invalid" } }, auditEvents: [], auditCalls: 0
   };
   const repository = {
     findMembershipsForActor: id => state.memberships.filter(m => m.actorId.toLowerCase() === id.toLowerCase()),
@@ -34,6 +34,10 @@ function fixtures(actorId = "owner-a@example.invalid", memberships, options = {}
       if (options.failAuditAt === state.auditCalls || options.failAllAudit) throw new Error("synthetic audit failure");
       state.auditEvents.push({ ...event });
     },
+    findCollectionSite: id => state.sites[id] ? { ...state.sites[id] } : null,
+    findCollectionSitesForOrganization: (orgId, limit) => Object.values(state.sites).filter(site => site.organizationId === orgId).slice(0, limit).map(site => ({ ...site })),
+    appendCollectionSite: record => { if (options.failSiteWrite) throw new Error("synthetic site write failure"); if (state.sites[record.siteId]) throw new Error("duplicate site"); state.sites[record.siteId] = { ...record }; },
+    updateCollectionSite: (id, changes) => { if (!state.sites[id]) return null; Object.assign(state.sites[id], changes); return { ok: true }; },
     appendCollectionRecord: record => {
       if (options.failCollectionWrite) throw new Error("synthetic write failure");
       if (state.collections[record.collectionId]) throw new Error("duplicate collection");
@@ -231,4 +235,61 @@ test("failed handover attempts produce a failure audit event", () => {
   });
   assert.equal(result.error.code, "HANDOVER_ALREADY_RECORDED");
   assert.equal(f.state.auditEvents.some(e => e.action === "RECORD_COLLECTION_HANDOVER" && e.outcome === "FAILED"), true);
+});
+
+test("site registry validates input, scopes reads and audits create/update", () => {
+  const f = fixtures();
+  const created = f.service.createCollectionSite({ organizationId:"ORG_A", siteId:"SITE_NEW", siteName:"Community Depot", country:"Botswana", locationDescription:"North district", operationId:"site-create-0001" });
+  assert.equal(created.ok, true); assert.equal(created.value.status, "ACTIVE"); assert.equal(created.value.createdBy, "owner-a@example.invalid");
+  assert.equal(f.state.auditEvents.some(e => e.action === "CREATE_COLLECTION_SITE" && e.outcome === "SUCCEEDED"), true);
+  assert.equal(f.service.updateCollectionSite({ organizationId:"ORG_A", siteId:"SITE_NEW", siteName:"Updated Depot", operationId:"site-update-0001" }).value.siteName, "Updated Depot");
+  assert.equal(f.service.getCollectionSite({ organizationId:"ORG_A", siteId:"SITE_NEW" }).ok, true);
+  assert.equal(f.service.listCollectionSites({ organizationId:"ORG_A" }).value.some(s => s.siteId === "SITE_NEW"), true);
+  assert.equal(f.service.getCollectionSite({ organizationId:"ORG_A", siteId:"SITE_FOREIGN" }).error.code, "SITE_NOT_FOUND");
+  assert.equal(f.service.listCollectionSites({ organizationId:"ORG_B" }).error.code, "MEMBERSHIP_NOT_FOUND");
+});
+test("site registry rejects invalid country, name, organization and spoofed fields", () => {
+  const f = fixtures();
+  assert.equal(f.service.createCollectionSite({ organizationId:"ORG_A", siteId:"SITE_X", siteName:"", country:"Botswana", operationId:"site-create-0002" }).error.code, "INVALID_SITE_NAME");
+  assert.equal(f.service.createCollectionSite({ organizationId:"ORG_A", siteId:"SITE_X", siteName:"Depot", country:"South Africa", operationId:"site-create-0003" }).error.code, "UNSUPPORTED_SITE_COUNTRY");
+  assert.equal(f.service.createCollectionSite({ organizationId:"ORG_A", siteId:"SITE_X", siteName:"Depot", country:"Eswatini", operationId:"site-create-0004" }).error.code, "SITE_COUNTRY_MISMATCH");
+  assert.equal(f.service.createCollectionSite({ organizationId:"ORG_A", siteId:"SITE_X", siteName:"Depot", country:"Botswana", operationId:"site-create-0005", role:"PLATFORM_ADMIN" }).error.code, "INVALID_REQUEST");
+  assert.equal(f.service.createCollectionSite({ organizationId:"ORG_B", siteId:"SITE_X", siteName:"Depot", country:"Eswatini", operationId:"site-create-0006" }).error.code, "MEMBERSHIP_NOT_FOUND");
+});
+test("site duplicate IDs, retries, conflicting idempotency and failures are handled safely", () => {
+  const f = fixtures();
+  const req = { organizationId:"ORG_A", siteId:"SITE_NEW", siteName:"Depot", country:"Botswana", operationId:"site-create-0007" };
+  assert.equal(f.service.createCollectionSite(req).ok, true); assert.equal(f.service.createCollectionSite(req).replayed, true);
+  assert.equal(f.service.createCollectionSite({ ...req, siteName:"Other Depot" }).error.code, "IDEMPOTENCY_CONFLICT");
+  assert.equal(f.service.createCollectionSite({ ...req, siteId:"SITE_1", operationId:"site-create-0008" }).error.code, "SITE_ID_UNAVAILABLE");
+  assert.equal(fixtures(null).service.listCollectionSites({ organizationId:"ORG_A" }).error.code, "IDENTITY_UNAVAILABLE");
+  assert.equal(fixtures("owner-a@example.invalid", undefined, { throwIdentity:true }).service.createCollectionSite(req).error.code, "IDENTITY_UNAVAILABLE");
+  const failedAudit = fixtures("owner-a@example.invalid", undefined, { failAuditAt:1 });
+  assert.equal(failedAudit.service.createCollectionSite({ ...req, operationId:"site-create-0009" }).ok, false);
+  const failedWrite = fixtures("owner-a@example.invalid", undefined, { failSiteWrite:true });
+  assert.equal(failedWrite.service.createCollectionSite({ ...req, operationId:"site-create-0010" }).error.code, "RECONCILIATION_REQUIRED");
+});
+test("collections require an active registered site and deactivation preserves historical records", () => {
+  const f = fixtures();
+  assert.equal(f.service.recordCollection(baseRequest({ siteId:"UNKNOWN_SITE" })).error.code, "SITE_NOT_AVAILABLE");
+  f.state.sites.SITE_INACTIVE = { ...f.state.sites.SITE_1, siteId:"SITE_INACTIVE", status:"INACTIVE" };
+  assert.equal(f.service.recordCollection(baseRequest({ siteId:"SITE_INACTIVE", operationId:"collect-op-0020" })).error.code, "SITE_NOT_AVAILABLE");
+  f.state.sites.SITE_B = { ...f.state.sites.SITE_1, siteId:"SITE_B", organizationId:"ORG_B", country:"Eswatini" };
+  assert.equal(f.service.recordCollection(baseRequest({ siteId:"SITE_B", operationId:"collect-op-0021" })).error.code, "SITE_NOT_AVAILABLE");
+  const created = f.service.recordCollection(baseRequest());
+  const deactivated = f.service.deactivateCollectionSite({ organizationId:"ORG_A", siteId:"SITE_1", operationId:"site-deactivate-0001" });
+  assert.equal(deactivated.ok, true); assert.equal(deactivated.value.status, "INACTIVE");
+  assert.equal(f.service.getCollectionRecord({ organizationId:"ORG_A", collectionId:created.value.collectionId }).ok, true);
+  assert.equal(f.service.recordCollection(baseRequest({ operationId:"collect-op-0022" })).error.code, "SITE_NOT_AVAILABLE");
+  assert.equal(f.state.collections[created.value.collectionId].siteId, "SITE_1");
+});
+test("site repository validates schema, unique IDs and formula-safe text", () => {
+  const sheets = {}; Object.keys(repoModule.schemas).forEach(name => { sheets[name] = fakeSheet(Array.from(repoModule.schemas[name])); });
+  const repository = repoModule.create(fakeSpreadsheet(sheets), { getProperty: () => "synthetic-sheet-id" });
+  const site = { siteId:"SITE_X", organizationId:"ORG_A", siteName:"=IMPORTXML(\"x\")", country:"Botswana", locationDescription:"@SUM(1,1)", status:"ACTIVE", createdAt:"now", updatedAt:"now", createdBy:"owner-a@example.invalid", updatedBy:"owner-a@example.invalid" };
+  repository.appendCollectionSite(site);
+  assert.equal(sheets.CollectionSites._grid[1][2], "'=IMPORTXML(\"x\")"); assert.equal(sheets.CollectionSites._grid[1][4], "'@SUM(1,1)");
+  assert.equal(repository.findCollectionSite("SITE_X").status, "ACTIVE");
+  assert.throws(() => repository.appendCollectionSite(site), /DUPLICATE_STABLE_ID/);
+  assert.throws(() => repoModule.create(fakeSpreadsheet({ CollectionSites: fakeSheet(["siteId","organizationId"]) }), { getProperty: () => "synthetic-sheet-id" }).findCollectionSite("SITE_X"), /SCHEMA_MISMATCH/);
 });

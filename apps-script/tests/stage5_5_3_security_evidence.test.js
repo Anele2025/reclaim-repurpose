@@ -94,7 +94,7 @@ test("AppSheet authentication remains explicitly unverified in the baseline", ()
   const value = clone(fixture);
   const item = value.cases.find(entry => entry.testCaseId === "APPSHEET-AUTH");
   assert.equal(item.status, "NOT_EXECUTED");
-  assert.equal(item.environment, "NOT_EXECUTED");
+  assert.equal(item.environment, "NOT_STARTED");
   assert.equal(item.evidenceRef, null);
   assert.equal(validateManifest(value).evidenceAssessmentStatus, "BLOCKED");
   assert.equal(validateManifest(value).gateStatus, "BLOCKED");
@@ -103,7 +103,7 @@ test("AppSheet authentication remains explicitly unverified in the baseline", ()
 test("fully populated synthetic evidence cannot produce a live PASS gate", () => {
   const value = fullyPopulatedLiveClaim();
   value.cases.forEach(item => { item.environment = "SYNTHETIC"; });
-  assert.throws(() => validateManifest(value), /cannot be PASS outside GOOGLE_LIVE/);
+  assert.throws(() => validateManifest(value), /requires GOOGLE_LIVE evidence/);
 });
 
 test("malformed JSON produces a clear CLI validation failure", () => {

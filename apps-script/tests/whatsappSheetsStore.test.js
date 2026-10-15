@@ -263,3 +263,34 @@ test("registration linkage is persisted before the registration adapter is invok
   assert.ok(row[headers.indexOf("registrationFingerprint")]);
   assert.throws(() => events.linkRegistration("linked-event", "digest", "ORG_A", "stale", request), /STALE_CLAIM_TOKEN/);
 });
+
+test("reconciliation completes an expired claim only when its linked registration is durably confirmed", () => {
+  const f = fixture();
+  const events = f.api.eventStore("ACCOUNT_A");
+  const claim = events.begin("recover-registration", "digest-r", "ORG_A");
+  const request = { organizationId: "ORG_A", registrationId: "reg-recover", operationId: "op-recover",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", locationDescription: "",
+    latitude: -24.6, longitude: 25.9 };
+  assert.equal(events.linkRegistration("recover-registration", "digest-r", "ORG_A", claim.claimToken, request).durable, true);
+  assert.equal(f.api.registrationStore().create(request).durable, true);
+  f.advance(101);
+  const result = f.api.reconcile({ limit: 1 });
+  assert.equal(result.quarantinedExpiredClaims, 0);
+  assert.equal(events.begin("recover-registration", "digest-r", "ORG_A").status, "REPLAY");
+  assert.throws(() => events.complete("recover-registration", "digest-r", "ORG_A", claim.claimToken, { ok: true }), /STALE_CLAIM_TOKEN/);
+});
+
+test("reconciliation quarantines linked claims when the registration row is absent", () => {
+  const f = fixture();
+  const events = f.api.eventStore("ACCOUNT_A");
+  const claim = events.begin("recover-missing", "digest-m", "ORG_A");
+  const request = { organizationId: "ORG_A", registrationId: "reg-missing", operationId: "op-missing",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", locationDescription: "",
+    latitude: 0, longitude: 0 };
+  events.linkRegistration("recover-missing", "digest-m", "ORG_A", claim.claimToken, request);
+  f.advance(101);
+  const result = f.api.reconcile({ limit: 1 });
+  assert.equal(result.quarantinedExpiredClaims, 1);
+  assert.equal(events.begin("recover-missing", "digest-m", "ORG_A").code, "RECONCILIATION_REQUIRED");
+  assert.throws(() => events.release("recover-missing", "digest-m", "ORG_A", claim.claimToken, "STALE"), /STALE_CLAIM_TOKEN/);
+});

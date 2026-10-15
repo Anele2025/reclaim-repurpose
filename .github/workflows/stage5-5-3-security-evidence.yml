@@ -10,6 +10,7 @@ on:
       - stage-5-9-whatsapp-registration
       - stage-5-10-whatsapp-durable-boundary
       - stage-5-11-durable-sheets-recovery
+      - stage-5-12-claim-fencing-recovery
   push:
     branches:
       - stage-5-5-3-security-evidence-gate

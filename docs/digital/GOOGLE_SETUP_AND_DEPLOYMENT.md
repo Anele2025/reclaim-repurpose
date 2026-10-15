@@ -109,3 +109,10 @@ Use only a dedicated Apps Script test project and disposable synthetic spreadshe
 Restrict direct workbook permissions independently. A script's application-level authorization does not protect a workbook from users who already have direct access. Test cross-organization access, direct workbook access, schema errors, audit failure, repeated operations, locking, and uncertain outcomes before considering AppSheet integration.
 
 See `docs/digital/STAGE_5_4_GOOGLE_INTEGRATION_AUDIT.md` for the current audit and manual acceptance checklist. Live Google identity, workbook permissions, locking/concurrency, quotas, and deployment security remain **NOT VERIFIED** until tested against real authorized Google services.
+
+
+## Stage 5.5 — controlled live integration verification
+
+Stage 5.5 adds adversarial repository regression tests and a synthetic-only live Google test runbook at [Stage 5.5 live Google integration verification](STAGE_5_5_LIVE_GOOGLE_INTEGRATION_VERIFICATION.md). Run all local checks, including `node --test apps-script/tests/*.test.js`. These tests use local fixtures/test doubles; they are not live Google tests.
+
+The live gate remains **BLOCKED / NOT VERIFIED** until an authorized dedicated Apps Script project and disposable synthetic workbook are tested using separately authenticated synthetic administrator and company-owner accounts. Verify identity in the exact intended execution mode, cross-organization denials, direct workbook permissions, lock contention, audit failure and recovery before AppSheet integration. Do not use the production workbook or share the master workbook with company owners. Do not claim a live test passed unless observed and recorded.

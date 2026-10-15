@@ -260,3 +260,96 @@ Passing software tests does not replace legal/site permission, safety, customer 
 This document is a specification, not proof that Google Sheets, Apps Script, AppSheet, WhatsApp or a production API has been configured or deployed. Google cloud resources must be created in the authorized account and verified there.
 
 No custom standalone web application is authorized by this plan. No real customer, partner, permit, financial or impact evidence is implied. Physical collection, sorting, storage, transport and handover remain gated by applicable requirements and verified arrangements.
+
+
+## 11. Required product detail: organization registration and service configuration
+
+The platform administrator may register, review, activate, pause, suspend, and archive participating organizations. Each organization must have a stable immutable `OrganizationID`, name, country (`Botswana` or `Eswatini`), status, authorized owner memberships, and versioned service configuration. Do not reuse IDs after archival.
+
+A service plan is an **operational configuration**, not automatically a paid subscription. It may define enabled workflows, material categories, collection/visit limits, evidence requirements, reporting cadence, and support/operational responsibilities. Any price, billing, or subscription semantics require a separately approved business requirement and are out of scope here. Enforce plan rules in server-side business logic for every create/update/automation path, not only by hiding AppSheet controls.
+
+Record an append-only audit event for plan assignment/change, activation, suspension, revocation, owner membership change, and status change. Include actor, timestamp, organization, action, prior/new configuration version or safe summary, reason, and correlation/operation ID. Never put secrets or unnecessary personal data in the audit record. A suspended organization must fail closed for restricted workflows while retaining authorized read-only access only if policy explicitly permits it.
+
+## 12. WhatsApp entry links and QR routing
+
+Support organization-specific WhatsApp entry links and QR codes that resolve to the correct organization/workflow. The encoded organization/workflow reference is a routing and attribution hint only; it is not proof of identity, consent, or authorization. Treat all parameters as untrusted.
+
+On every server-side action, resolve the organization from trusted configuration, verify that it exists and is active, validate the requested workflow against its service configuration, and apply identity/membership and record-scope authorization. Reject unknown, suspended, malformed, or disallowed organization/workflow combinations. Avoid placing personal data or secrets in links or QR payloads. Provide a safe fallback for expired or invalid routes. Do not claim a WhatsApp Business API, provider webhook, outbound messaging, or delivery-status integration exists until it is implemented and verified with provider-side evidence.
+
+## 13. GPS and location privacy
+
+Request a location only when it is necessary for a defined operation—for example, a participant explicitly requests a pickup and a location is needed to dispatch it, or a driver records a specific visit/handover. Explain the purpose before requesting consent. Do not request continuous/background tracking by default.
+
+- **Consent granted:** collect only the minimum precision needed for the task; record coordinates only when genuinely supplied and operationally necessary.
+- **Consent denied:** allow a manual address/landmark or mark location unavailable where the workflow can safely continue; do not penalize or silently override the choice.
+- **Location unavailable:** record an explicit unavailable/not-provided state and offer a manual alternative.
+- **Potentially inaccurate:** preserve the reported accuracy radius when supplied, timestamp when actually supplied, and a user-confirmation step where needed. Do not claim a GPS fix is verified merely because coordinates exist.
+- **Access and retention:** restrict precise coordinates to assigned operators and authorized organization members with a need to know; hide or generalize them in broad reports. Define a documented retention period per purpose, delete or aggregate when no longer needed subject to legal/operational holds, and log authorized access/export. Do not collect location in background without a separately reviewed and explicit requirement.
+
+A location field must distinguish not requested, consented/provided, denied, unavailable, and inaccurate/needs-confirmation. Do not fabricate accuracy or timestamp metadata.
+
+## 14. Collection request and material lifecycle states
+
+Preserve Stage 1 operational CSV field meanings and identifiers wherever practical. Map new application entities to the existing customer/site, collection, material event, handover, finance, and impact schemas; document any necessary migration before changing a field.
+
+A collection request/visit should record stable IDs, organization and country, site/request reference, requested/planned/actual visit times as applicable, material type, quantity and unit, measurement method/confidence, contamination/quality result, operator, status, and evidence references. Keep request/visit status distinct from material disposition. Use explicit states such as `REQUESTED`, `PLANNED`, `IN_PROGRESS`, `COLLECTED`, `PARTIALLY_COLLECTED`, `NOT_COLLECTED`, `CANCELLED`, and `UNRESOLVED` where appropriate.
+
+Material disposition must distinguish at least planned, collected, sorted, rejected/contaminated, handed over, partner accepted/rejected, and unresolved quantities. Do not overwrite a prior state without an attributable correction/audit event. Quantity and unit must be explicit and compatible across related events. A partner acceptance or handover receipt proves only what that evidence says; **collection, sorting, and handover are not verified recycling**. Use a recovery/recycling verified state only after suitable downstream processing evidence has been reviewed and linked to the relevant material flow.
+
+## 15. Manual payment confirmation (no payment integration in this stage)
+
+Manual records must distinguish `EXPECTED`, `REPORTED`, `PENDING_CONFIRMATION`, `CONFIRMED`, `REJECTED`, `CORRECTION_PENDING`, `CORRECTED`, and `CANCELLED` as applicable. A participant's WhatsApp message or unsupported claim is not evidence of successful payment.
+
+Define a least-privilege policy before enabling payment records. The person reporting a payment must be identified; confirmation must be performed by a separately authorized role where practicable, with conflicts of interest and self-confirmation explicitly controlled. Record amount, currency, event timestamp, recorded/confirmed actor, confirmation method, transaction/reference number where relevant, evidence reference, and correction linkage. Never store full payment credentials or secrets. Corrections must be append-only adjustments or linked correction events; do not silently rewrite financial history.
+
+Keep Botswana monetary amounts in BWP and Eswatini monetary amounts in SZL. Do not silently convert. This stage does not implement a payment gateway, bank connection, card processing, or mobile-money API unless a separately verified existing project requirement is approved.
+
+## 16. Developer operations and monitoring
+
+Provide a least-privilege monitoring view/record set for:
+- failed automation and integration jobs, with safe error codes and correlation IDs;
+- retry queues, attempt counts, next retry time, and stale/in-progress tasks;
+- authorization denials, repeated failures, and suspicious cross-organization access attempts;
+- data-quality failures, invalid transitions, missing evidence, and unresolved records;
+- WhatsApp webhook/send/delivery failures only after such integration exists;
+- Apps Script quotas, execution timeouts, backup/export and restore failures, and configuration/deployment drift where measurable.
+
+Monitoring should expose operational metadata by default, not full participant or financial records. Developer identity is not an automatic bypass. Any emergency elevated access must be explicitly authorized, time-limited, justified, audited, and reviewed. Alert thresholds, retry bounds, retention, and recovery objectives must be configured and tested before production reliance. Do not report monitoring coverage for a service that is not integrated.
+
+## 17. Privacy, security, and trust boundaries
+
+- Enforce authenticated identity, active membership, role, organization, record ownership/scope, organization status, service-plan rules, and allowed workflow transitions on the server.
+- AppSheet security filters and views are defense-in-depth, not the only authorization layer. Test direct data-source and API access paths.
+- Keep secrets in appropriate Google-managed script properties/secret facilities or approved secret management; never in source, Sheets, URLs, logs, fixtures, or committed manifests. Rotate and revoke compromised credentials.
+- Verify provider webhook signatures using the provider's documented method, validate timestamps where supported, and persist replay/idempotency identifiers with bounded retention. Reject invalid signatures and duplicate/replayed events. Until implemented, treat all webhook integration as unavailable.
+- Log security-relevant membership, organization configuration, denied access, exports, sensitive record access where justified, corrections, and privileged actions. Redact tokens, OTPs, credentials, precise location and unnecessary personal data from logs.
+- Minimize collection and access to personal data; define purpose, retention, deletion, export and incident-response procedures. Confirm country-specific privacy and legal requirements independently for Botswana and Eswatini.
+- Use synthetic fixtures only in automated tests. Never include real credentials, access tokens, participant secrets, real participant data, or genuine location data in source control.
+- Use a server-side membership lookup based on the authenticated execution identity. An organization ID supplied by a caller is only a requested target and never establishes authorization.
+
+## 18. First local validation module: contract and boundary
+
+The first implementation layer may contain pure JavaScript validation functions usable both in Apps Script's V8 runtime and local Node.js tests. Keep these functions separate from Google services. They may validate required organization fields, stable ID format, supported country/currency pairs, enumerated statuses, operation IDs, and whether a requested organization matches a membership context that has already been loaded and authenticated by trusted server-side code.
+
+**Important limitation:** a pure function receiving `authenticatedEmail`, `role`, or `OrganizationID` from an arbitrary caller cannot authenticate that caller. It must not be exposed as a security endpoint by itself. The production adapter must obtain identity from a verified execution context, load current membership from a protected source, check membership status/role and organization status, then call the pure policy function. Tests of the pure function prove only the supplied-context policy, not Google authentication, data-source isolation, or deployed security.
+
+Use structured, non-sensitive validation errors (stable error code and safe field/reason). Do not echo full input records, email addresses, coordinates, credentials, or secrets in failures. Detect duplicate operation IDs through a durable server-side idempotency store with atomic/locked reservation and defined retention; an in-memory test set alone is not production duplicate protection.
+
+## 19. Country, currency, and local requirements
+
+Allowed country/currency combinations for applicable monetary records are exactly Botswana/BWP and Eswatini/SZL. Reject unsupported countries, mismatched currencies, and missing currency where an amount requires one. Never silently convert. Any later exchange-rate reporting must be a separately specified feature that records source, rate, effective timestamp, calculation, and original amount/currency alongside the converted value.
+
+Country-specific legal, environmental, municipal, transport, employment, tax, privacy, site-access, and waste-handling requirements must be verified independently for each country and actual activity/site. Software validation is not legal advice or regulatory clearance.
+
+## 20. Stage 5.1 release evidence
+
+Stage 5.1 may be considered complete only when:
+1. README and this specification accurately state the implementation status and agreed architecture.
+2. Existing Stage 1–4 schemas and documents remain intact, or any intentional change is explained.
+3. Pure validation source has local automated tests for valid/invalid organizations, country/currency rules, missing fields, invalid statuses, cross-organization policy attempts, duplicate operation IDs, and safe errors.
+4. Tests are run and tied to the exact commit SHA; CI is claimed only when a current commit has a successful corresponding run.
+5. Setup/deployment instructions explain project creation, authorization, test/deploy workflow, script properties, quotas, AppSheet plan/security checks, rollback, and what has not been verified.
+6. The PR remains open and unmerged. No Google deployment or WhatsApp integration is claimed without direct evidence.
+7. No standalone custom web application, blockchain, smart contracts, or cryptocurrency is introduced.
+
+The next technical stage after this baseline is the authenticated Apps Script/Google Sheets adapter: derive caller identity from the actual Google execution context, perform server-side membership and organization-status lookup, enforce authorization on each read/write, and add integration tests in an authorized Google test project. Do not expose company data until negative cross-organization tests pass.

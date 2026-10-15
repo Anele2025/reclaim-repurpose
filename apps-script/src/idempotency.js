@@ -13,12 +13,11 @@ var ReclaimIdempotency = (function () {
     try { lock = lockService.getScriptLock(); }
     catch (_) { return fail("LOCK_UNAVAILABLE", "Operation could not be safely reserved; retry later."); }
     var acquired = false;
-    try { acquired = lock.tryLock(10000); }
-    catch (_) { acquired = false; }
+    try { acquired = lock.tryLock(10000); } catch (_) { acquired = false; }
     if (!acquired) return fail("LOCK_UNAVAILABLE", "Operation could not be safely reserved; retry later.");
-    var operation;
+    var reserved = false;
     try {
-      operation = repository.findOperation(input.operationId);
+      var operation = repository.findOperation(input.operationId);
       if (operation) {
         var same = String(operation.actorId) === input.actorId &&
           String(operation.organizationId) === input.organizationId &&
@@ -33,10 +32,7 @@ var ReclaimIdempotency = (function () {
             operation.status === "RECONCILIATION_REQUIRED") {
           return fail("RECONCILIATION_REQUIRED", "Operation outcome is not safely replayable; reconcile its recorded status first.");
         }
-        if (operation.status === "FAILED_RETRYABLE") {
-          return fail("RETRY_REQUIRES_NEW_OPERATION", "Create a new operation ID after confirming the previous attempt had no side effects.");
-        }
-        return fail("RECONCILIATION_REQUIRED", "Operation status is not recognized; do not repeat the mutation.");
+        return fail("RETRY_REQUIRES_NEW_OPERATION", "A failed operation is not replayed. Confirm it had no side effects before creating a new operation ID.");
       }
       repository.appendIdempotency({
         operationId: input.operationId, actorId: input.actorId, organizationId: input.organizationId,
@@ -44,10 +40,7 @@ var ReclaimIdempotency = (function () {
         status: "PROCESSING", resultRef: "", resultJson: "", correlationId: input.correlationId,
         createdAt: now, updatedAt: now
       });
-    } catch (_) {
-      return fail("IDEMPOTENCY_STORE_UNAVAILABLE", "Operation could not be safely reserved.");
-    }
-    try {
+      reserved = true;
       var result = mutation();
       if (!result || result.ok !== true) {
         repository.updateOperation(input.operationId, {
@@ -61,14 +54,16 @@ var ReclaimIdempotency = (function () {
       });
       return { ok: true, replayed: false, value: result.value, correlationId: input.correlationId };
     } catch (_) {
-      try {
-        repository.updateOperation(input.operationId, {
-          status: "RECONCILIATION_REQUIRED", resultRef: "", resultJson: "", updatedAt: now
-        });
-      } catch (__) { /* The existing PROCESSING record remains a fail-closed recovery signal. */ }
-      return fail("RECONCILIATION_REQUIRED", "The operation outcome is uncertain; do not retry with a new operation ID until reconciled.");
+      if (reserved) {
+        try {
+          repository.updateOperation(input.operationId, {
+            status: "RECONCILIATION_REQUIRED", resultRef: "", resultJson: "", updatedAt: now
+          });
+        } catch (__) { /* A PROCESSING row is intentionally a fail-closed recovery signal. */ }
+      }
+      return fail("RECONCILIATION_REQUIRED", "The operation outcome is uncertain; do not retry until the recorded state is reconciled.");
     } finally {
-      lock.releaseLock();
+      try { lock.releaseLock(); } catch (_) { /* No further action is safe if release fails. */ }
     }
   }
   return Object.freeze({ execute: execute, states: STATES });

@@ -243,6 +243,7 @@ test("site registry validates input, scopes reads and audits create/update", () 
   assert.equal(created.ok, true); assert.equal(created.value.status, "ACTIVE"); assert.equal(created.value.createdBy, "owner-a@example.invalid");
   assert.equal(f.state.auditEvents.some(e => e.action === "CREATE_COLLECTION_SITE" && e.outcome === "SUCCEEDED"), true);
   assert.equal(f.service.updateCollectionSite({ organizationId:"ORG_A", siteId:"SITE_NEW", siteName:"Updated Depot", operationId:"site-update-0001" }).value.siteName, "Updated Depot");
+  assert.equal(f.state.auditEvents.some(e => e.action === "UPDATE_COLLECTION_SITE" && e.outcome === "SUCCEEDED"), true);
   assert.equal(f.service.getCollectionSite({ organizationId:"ORG_A", siteId:"SITE_NEW" }).ok, true);
   assert.equal(f.service.listCollectionSites({ organizationId:"ORG_A" }).value.some(s => s.siteId === "SITE_NEW"), true);
   assert.equal(f.service.getCollectionSite({ organizationId:"ORG_A", siteId:"SITE_FOREIGN" }).error.code, "SITE_NOT_FOUND");
@@ -290,6 +291,18 @@ test("site repository validates schema, unique IDs and formula-safe text", () =>
   repository.appendCollectionSite(site);
   assert.equal(sheets.CollectionSites._grid[1][2], "'=IMPORTXML(\"x\")"); assert.equal(sheets.CollectionSites._grid[1][4], "'@SUM(1,1)");
   assert.equal(repository.findCollectionSite("SITE_X").status, "ACTIVE");
+  const malformedRow = ["SITE_BAD","ORG_A","","Botswana","","ACTIVE","now","now","actor","actor"];
+  const malformedRepo = repoModule.create(fakeSpreadsheet({ CollectionSites: fakeSheet(Array.from(repoModule.schemas.CollectionSites), [malformedRow]) }), { getProperty: () => "synthetic-sheet-id" });
+  assert.throws(() => malformedRepo.findCollectionSite("SITE_BAD"), /PERSISTED_SITE_INVALID/);
   assert.throws(() => repository.appendCollectionSite(site), /DUPLICATE_STABLE_ID/);
   assert.throws(() => repoModule.create(fakeSpreadsheet({ CollectionSites: fakeSheet(["siteId","organizationId"]) }), { getProperty: () => "synthetic-sheet-id" }).findCollectionSite("SITE_X"), /SCHEMA_MISMATCH/);
+});
+
+test("site mutations deny revoked membership and reject client-supplied status", () => {
+  const revoked = fixtures("owner-a@example.invalid", [{ membershipId:"M-A", actorId:"owner-a@example.invalid", organizationId:"ORG_A", role:"COMPANY_OWNER", status:"REVOKED" }]);
+  assert.equal(revoked.service.createCollectionSite({ organizationId:"ORG_A", siteId:"SITE_REVOKED", siteName:"Depot", country:"Botswana", operationId:"site-revoke-0001" }).error.code, "MEMBERSHIP_INACTIVE");
+  const active = fixtures();
+  assert.equal(active.service.updateCollectionSite({ organizationId:"ORG_A", siteId:"SITE_1", status:"ACTIVE", operationId:"site-status-0001" }).error.code, "INVALID_REQUEST");
+  assert.equal(active.service.deactivateCollectionSite({ organizationId:"ORG_A", siteId:"SITE_1", operationId:"site-deactivate-0002" }).ok, true);
+  assert.equal(active.state.auditEvents.some(e => e.action === "DEACTIVATE_COLLECTION_SITE" && e.outcome === "SUCCEEDED"), true);
 });

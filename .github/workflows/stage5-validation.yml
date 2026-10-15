@@ -1,4 +1,4 @@
-name: Stage 5.1 validation
+name: Stage 5 validation
 
 on:
   pull_request:
@@ -11,6 +11,7 @@ on:
   push:
     branches:
       - stage-5-working-mvp
+      - stage-5-2-authenticated-sheets-backend
 
 jobs:
   pure-validation:
@@ -22,8 +23,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Run Apps Script pure validation tests
-        run: node --test apps-script/tests/validation.test.js
+      - name: Run Apps Script-compatible tests
+        run: node --test apps-script/tests/*.test.js
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

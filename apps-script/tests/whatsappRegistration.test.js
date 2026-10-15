@@ -16,15 +16,29 @@ function fixture(options = {}) {
     parseWebhook: request => { state.parseCalls++; if (options.parseThrows) throw new Error("bad"); return request.payload; },
     resolveOrganization: request => { state.routeCalls++; return Object.prototype.hasOwnProperty.call(options, "organization") ? options.organization : (request.trustedRoute || ""); },
     digestEvent: event => JSON.stringify({ eventId: event.eventId, senderId: event.senderId, type: event.type, text: event.text, latitude: event.latitude, longitude: event.longitude }),
-    eventStore: { claim(id, digest, org) {
-      const previous = state.events.get(id);
-      if (!previous) { state.events.set(id, { digest, org }); return { status: "NEW" }; }
-      return { status: previous.digest === digest && previous.org === org ? "REPLAY" : "CONFLICT" };
-    } },
+    eventStore: {
+      begin(id, digest, org) {
+        const previous = state.events.get(org + "|" + id);
+        if (!previous) { state.events.set(org + "|" + id, { digest, org, status: "PROCESSING" }); return { status: "NEW" }; }
+        if (previous.digest !== digest || previous.org !== org) return { status: "CONFLICT" };
+        if (previous.status === "COMPLETE") return { status: "REPLAY", result: previous.result };
+        return { status: "IN_PROGRESS" };
+      },
+      complete(id, digest, org, result) {
+        const key = org + "|" + id, previous = state.events.get(key);
+        if (!previous || previous.digest !== digest || previous.status !== "PROCESSING") throw new Error("claim mismatch");
+        state.events.set(key, { digest, org, status: "COMPLETE", result });
+      },
+      release(id, digest, org) {
+        const key = org + "|" + id, previous = state.events.get(key);
+        if (previous && previous.digest === digest && previous.status === "PROCESSING") state.events.delete(key);
+      }
+    },
     sessionStore: {
       get: (org, sender) => state.sessions.get(key(org, sender)) || null,
       put: (org, sender, value) => state.sessions.set(key(org, sender), JSON.parse(JSON.stringify(value))),
-      remove: (org, sender) => state.sessions.delete(key(org, sender))
+      remove: (org, sender) => state.sessions.delete(key(org, sender)),
+      withSenderLock: (org, sender, callback) => callback()
     },
     createRegistration: request => {
       if (options.persistThrows) throw new Error("write failed");

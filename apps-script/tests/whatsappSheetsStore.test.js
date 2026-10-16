@@ -63,7 +63,8 @@ function fixture(options = {}) {
   const spreadsheet = fakeSpreadsheet(options);
   let clock = 1_800_000_000_000;
   let id = 0;
-  const lock = { tryLock: () => !options.lockBusy, releaseLock: () => {} };
+  let lockReleases = 0;
+  const lock = { tryLock: () => !options.lockBusy, releaseLock: () => { lockReleases++; } };
   const api = context.ReclaimWhatsAppSheetsStore.create({
     spreadsheet,
     lockService: { getScriptLock: () => lock },
@@ -75,7 +76,7 @@ function fixture(options = {}) {
     batchLimit: 3
   });
   if (!options.skipInitialize) api.initialize();
-  return { api, spreadsheet, options, advance: ms => { clock += ms; } };
+  return { api, spreadsheet, options, lock, lockReleases: () => lockReleases, advance: ms => { clock += ms; } };
 }
 const event = (store, id = "event-1", digest = "digest", org = "ORG_A") => store.eventStore("ACCOUNT_A").begin(id, digest, org);
 
@@ -347,4 +348,82 @@ test("reconciliation treats cross-tenant identifier collisions as contradictory 
   const result = f.api.reconcile({ limit: 1 });
   assert.equal(result.quarantinedExpiredClaims, 1);
   assert.equal(eventsA.begin("cross-tenant-recovery", "digest", "ORG_A").code, "RECONCILIATION_REQUIRED");
+});
+
+
+test("missing, empty, wrong-event, and wrong-tenant claim tokens fail closed", () => {
+  const f = fixture();
+  const eventsA = f.api.eventStore("ACCOUNT_A");
+  const eventsB = f.api.eventStore("ACCOUNT_B");
+  const one = eventsA.begin("token-event-a", "digest-a", "ORG_A");
+  const two = eventsA.begin("token-event-b", "digest-b", "ORG_A");
+  assert.throws(() => eventsA.complete("token-event-a", "digest-a", "ORG_A", "", { ok: true }), /STALE_CLAIM_TOKEN/);
+  assert.throws(() => eventsA.complete("token-event-a", "digest-a", "ORG_A", undefined, { ok: true }), /STALE_CLAIM_TOKEN/);
+  assert.throws(() => eventsA.complete("token-event-a", "digest-a", "ORG_A", two.claimToken, { ok: true }), /STALE_CLAIM_TOKEN/);
+  assert.throws(() => eventsB.complete("token-event-a", "digest-a", "ORG_A", one.claimToken, { ok: true }), /EVENT_CLAIM_MISMATCH/);
+  assert.equal(eventsA.begin("token-event-a", "digest-a", "ORG_A").status, "IN_PROGRESS");
+});
+
+test("registration ID reuse with changed payload is rejected without adding a row", () => {
+  const f = fixture();
+  const store = f.api.registrationStore();
+  const original = { organizationId: "ORG_A", registrationId: "stable-reg", operationId: "stable-op",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", latitude: 0, longitude: 0 };
+  assert.equal(store.create(original).ok, true);
+  const changed = store.create({ ...original, customerName: "Different Synthetic Customer" });
+  assert.equal(changed.ok, false);
+  assert.equal(changed.code, "IDEMPOTENCY_CONFLICT");
+  assert.equal(f.spreadsheet.getSheetByName("Registrations").getLastRow(), 2);
+});
+
+test("duplicate registration rows are never accepted as durable success", () => {
+  const f = fixture();
+  const store = f.api.registrationStore();
+  const request = { organizationId: "ORG_A", registrationId: "dup-reg", operationId: "dup-op",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", latitude: 0, longitude: 0 };
+  assert.equal(store.create(request).ok, true);
+  const row = f.spreadsheet.getSheetByName("Registrations")._data[1].slice();
+  f.spreadsheet.getSheetByName("Registrations").appendRow(row);
+  const retry = store.create(request);
+  assert.equal(retry.ok, false);
+  assert.equal(retry.durable, false);
+  assert.equal(retry.code, "REGISTRATION_DUPLICATE_ROWS");
+});
+
+test("repeated reconciliation remains bounded and does not re-create registrations", () => {
+  const f = fixture();
+  const events = f.api.eventStore("ACCOUNT_A");
+  const claim = events.begin("repeat-reconcile", "digest", "ORG_A");
+  const request = { organizationId: "ORG_A", registrationId: "repeat-reg", operationId: "repeat-op",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", locationDescription: "",
+    latitude: 0, longitude: 0 };
+  events.linkRegistration("repeat-reconcile", "digest", "ORG_A", claim.claimToken, request);
+  f.api.registrationStore().create(request);
+  f.advance(101);
+  const first = f.api.reconcile({ limit: 1 });
+  const countAfterFirst = f.spreadsheet.getSheetByName("Registrations").getLastRow();
+  const second = f.api.reconcile({ limit: 1 });
+  assert.equal(first.quarantinedExpiredClaims, 0);
+  assert.equal(second.inspected, 0);
+  assert.equal(f.spreadsheet.getSheetByName("Registrations").getLastRow(), countAfterFirst);
+  assert.equal(events.begin("repeat-reconcile", "digest", "ORG_A").status, "REPLAY");
+});
+
+test("adapter releases ScriptLock when a guarded operation throws", () => {
+  const f = fixture();
+  const before = f.lockReleases();
+  assert.throws(() => f.api.eventStore("ACCOUNT_A").complete("missing", "digest", "ORG_A", "token", { ok: true }), /EVENT_CLAIM_MISMATCH/);
+  assert.equal(f.lockReleases(), before + 1);
+});
+
+test("audit append failure does not fabricate failure after primary registration is verified", () => {
+  const f = fixture();
+  const store = f.api.registrationStore();
+  const request = { organizationId: "ORG_A", registrationId: "audit-reg", operationId: "audit-op",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", latitude: 0, longitude: 0 };
+  f.options.failAppendBeforeWriteTab = "Audit";
+  const result = store.create(request);
+  assert.equal(result.ok, true);
+  assert.equal(result.durable, true);
+  assert.equal(f.spreadsheet.getSheetByName("Registrations").getLastRow(), 2);
 });

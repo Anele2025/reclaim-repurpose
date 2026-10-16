@@ -408,7 +408,7 @@ test("repeated reconciliation remains bounded and does not re-create registratio
   const countAfterFirst = f.spreadsheet.getSheetByName("Registrations").getLastRow();
   const second = f.api.reconcile({ limit: 1 });
   assert.equal(first.quarantinedExpiredClaims, 0);
-  assert.equal(second.inspected, 0);
+  assert.equal(second.inspected, 1); // no event candidate; one registration row inspected for duplicate-operation review
   assert.equal(f.spreadsheet.getSheetByName("Registrations").getLastRow(), countAfterFirst);
   assert.equal(events.begin("repeat-reconcile", "digest", "ORG_A").status, "REPLAY");
 });

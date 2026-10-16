@@ -194,7 +194,10 @@ var ReclaimWhatsAppSheetsStore = (function () {
             record.registrationFingerprint = fingerprint; record.updatedAt = nowMs();
             write("Events", record._row, record);
             var verify = eventRow(organizationId, eventId, accountScope);
-            if (!verify || verify.claimToken !== claimToken || verify.registrationId !== request.registrationId || verify.operationId !== request.operationId || verify.registrationFingerprint !== fingerprint) fail("REGISTRATION_LINK_UNCERTAIN");
+            if (!verify || verify.status !== "PROCESSING" || verify.organizationId !== organizationId ||
+                verify.digest !== digestValue || verify.claimToken !== claimToken ||
+                verify.registrationId !== request.registrationId || verify.operationId !== request.operationId ||
+                verify.registrationFingerprint !== fingerprint) fail("REGISTRATION_LINK_UNCERTAIN");
             audit("EVENT", organizationId, eventId, "REGISTRATION_LINKED", "");
             return { ok: true, durable: true, replay: false };
           });
@@ -214,6 +217,14 @@ var ReclaimWhatsAppSheetsStore = (function () {
             record.status = "COMPLETE"; record.updatedAt = stamp; record.completedAt = stamp;
             record.leaseExpiresAt = ""; record.resultJson = JSON.stringify(result); record.lastErrorCode = "";
             write("Events", record._row, record);
+            // A normal return from setValues is not sufficient evidence that the
+            // completed state and result were actually persisted.
+            var verify = eventRow(organizationId, eventId, accountScope);
+            if (!verify || verify.organizationId !== organizationId || verify.digest !== digest ||
+                verify.status !== "COMPLETE" || verify.claimToken !== claimToken ||
+                verify.resultJson !== JSON.stringify(result) || Number(verify.completedAt) !== stamp) {
+              fail("EVENT_COMPLETION_UNCERTAIN");
+            }
             audit("EVENT", organizationId, eventId, "COMPLETE", "");
             return { ok: true };
           });
@@ -343,7 +354,9 @@ var ReclaimWhatsAppSheetsStore = (function () {
               payloadJson: JSON.stringify(payload), status: "SUCCEEDED", createdAt: stamp, updatedAt: stamp });
             // Re-read by stable identifiers before reporting durable success.
             var verify = matches(request);
-            if (verify.length !== 1 || verify[0].payloadFingerprint !== mark || verify[0].status !== "SUCCEEDED") {
+            if (verify.length !== 1 || verify[0].organizationId !== request.organizationId ||
+                verify[0].registrationId !== request.registrationId || verify[0].operationId !== request.operationId ||
+                verify[0].payloadFingerprint !== mark || verify[0].status !== "SUCCEEDED") {
               audit("REGISTRATION", request.organizationId, request.operationId, "UNCERTAIN", "POST_WRITE_VERIFY_FAILED");
               return { ok: false, durable: false, code: "PERSISTENCE_UNCERTAIN", retryable: true };
             }

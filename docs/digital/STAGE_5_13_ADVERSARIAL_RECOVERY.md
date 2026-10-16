@@ -46,7 +46,7 @@ Added deterministic regression tests to `apps-script/tests/whatsappSheetsStore.t
 - operation-ID reuse across organizations;
 - cross-tenant identifier collisions during reconciliation.
 
-Additional tests cover missing/empty/wrong-event/wrong-scope claim tokens, changed payload under a reused registration ID, duplicate registration rows, repeated bounded reconciliation, lock release after a thrown operation, best-effort audit failure, and silent/no-op writes at event completion, registration linkage, and registration append boundaries.
+Additional tests cover missing/empty/wrong-event/wrong-scope claim tokens, changed payload under a reused registration ID, duplicate registration rows, repeated bounded reconciliation, lock release after a thrown operation, best-effort audit failure, silent/no-op writes at event completion, registration linkage, and registration append boundaries, plus read-back failures after persisted linkage/registration writes.
 
 The fake-spreadsheet fixture remains synthetic. A seeded conflicting row models a writer bypassing this adapter; it does not claim to simulate all real Google Sheets races.
 
@@ -62,11 +62,11 @@ The fake-spreadsheet fixture remains synthetic. A seeded conflicting row models 
 
 ## Validation status
 
-**Automated repository validation passed for implementation commit `9eda0ce11f374ce09a0fd0698e36e8e4071b1a7f`.**
+**Automated repository validation passed for implementation commit `3104adf0fc7faea39d23ce93f308741ad184f6da`.**
 
-- [Stage 5 validation #38827204298](https://github.com/Anele2025/reclaim-repurpose/actions/runs/38827204298): **success** — 140 JavaScript tests passed, 0 failed; 4 Python package tests passed; deterministic package build, generated-package content checks, generated JavaScript syntax check, and Stage 4 validation passed.
-- [Security Evidence Validation #38827204277](https://github.com/Anele2025/reclaim-repurpose/actions/runs/38827204277): **success** — evidence-validator tests, adversarial evidence-gate tests, all 140 JavaScript tests, 4 Python package tests, deterministic package build, generated syntax check, and Stage 4 validation passed.
-- Both workflows completed successfully for implementation commit `9eda0ce11f374ce09a0fd0698e36e8e4071b1a7f`. A documentation-only update to this report will advance the branch head; the pull request's latest head and its own runs must still be checked separately.
+- [Stage 5 validation #38827454423](https://github.com/Anele2025/reclaim-repurpose/actions/runs/38827454423): **success** — 142 JavaScript tests passed, 0 failed; 4 Python package tests passed; deterministic package build, generated-package content checks, generated JavaScript syntax check, and Stage 4 validation passed.
+- [Security Evidence Validation #38827454409](https://github.com/Anele2025/reclaim-repurpose/actions/runs/38827454409): **success** — evidence-validator tests, adversarial evidence-gate tests, all 142 JavaScript tests, 4 Python package tests, deterministic package build, generated syntax check, and Stage 4 validation passed.
+- Both workflows completed successfully for implementation commit `3104adf0fc7faea39d23ce93f308741ad184f6da`. A documentation-only update to this report will advance the branch head; the pull request's latest head and its own runs must still be checked separately.
 - These are repository/fixture checks only. They do not prove real Google Sheets concurrency, transactional behavior, exactly-once processing, live integration, or deployment.
 
 ## Limitations and non-goals

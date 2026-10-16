@@ -16,6 +16,10 @@ function fakeSpreadsheet(options = {}) {
     function range(row, col, rowCount, colCount) {
       return {
         getValues() {
+          if (options.failNextReadTab === name) {
+            options.failNextReadTab = "";
+            throw new Error("synthetic read-back failure");
+          }
           return Array.from({ length: rowCount }, (_, r) =>
             Array.from({ length: colCount }, (_, c) => (data[row - 1 + r] || [])[col - 1 + c] ?? ""));
         },
@@ -33,6 +37,10 @@ function fakeSpreadsheet(options = {}) {
             if (!data[index]) data[index] = [];
             valuesRow.forEach((value, c) => { data[index][col - 1 + c] = value; });
           });
+          if (options.failReadAfterSetTab === name) {
+            options.failReadAfterSetTab = "";
+            options.failNextReadTab = name;
+          }
           if (options.failSetAfterWriteTab === name) {
             options.failSetAfterWriteTab = "";
             throw new Error("synthetic acknowledgement lost after write");
@@ -57,6 +65,10 @@ function fakeSpreadsheet(options = {}) {
           throw new Error("synthetic append failure before write");
         }
         data.push(values.slice());
+        if (options.failReadAfterAppendTab === name) {
+          options.failReadAfterAppendTab = "";
+          options.failNextReadTab = name;
+        }
         if (options.failAppendAfterWriteTab === name) {
           options.failAppendAfterWriteTab = "";
           throw new Error("synthetic append acknowledgement lost after write");
@@ -472,4 +484,37 @@ test("registration persistence verifies the stable identifier tuple after a sile
   assert.equal(result.durable, false);
   assert.equal(result.code, "PERSISTENCE_UNCERTAIN");
   assert.equal(f.spreadsheet.getSheetByName("Registrations").getLastRow(), 1);
+});
+
+
+test("registration linkage reports uncertainty when the post-write read-back fails", () => {
+  const f = fixture();
+  const events = f.api.eventStore("ACCOUNT_A");
+  const claim = events.begin("readback-link", "digest", "ORG_A");
+  const request = { organizationId: "ORG_A", registrationId: "readback-reg", operationId: "readback-op",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", locationDescription: "",
+    latitude: 0, longitude: 0 };
+  f.options.failReadAfterSetTab = "Events";
+  assert.throws(() => events.linkRegistration("readback-link", "digest", "ORG_A", claim.claimToken, request), /synthetic read-back failure/);
+  const retry = events.linkRegistration("readback-link", "digest", "ORG_A", claim.claimToken, request);
+  assert.equal(retry.ok, true);
+  assert.equal(retry.durable, true);
+  assert.equal(retry.replay, true);
+});
+
+test("registration creation can safely resolve a persisted write after read-back failure", () => {
+  const f = fixture();
+  const store = f.api.registrationStore();
+  const request = { organizationId: "ORG_A", registrationId: "readback-reg", operationId: "readback-op",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", latitude: 0, longitude: 0 };
+  f.options.failReadAfterAppendTab = "Registrations";
+  const uncertain = store.create(request);
+  assert.equal(uncertain.ok, false);
+  assert.equal(uncertain.durable, false);
+  assert.equal(uncertain.retryable, true);
+  const retry = store.create(request);
+  assert.equal(retry.ok, true);
+  assert.equal(retry.durable, true);
+  assert.equal(retry.replay, true);
+  assert.equal(f.spreadsheet.getSheetByName("Registrations").getLastRow(), 2);
 });

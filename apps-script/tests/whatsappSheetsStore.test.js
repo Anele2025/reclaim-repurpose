@@ -20,6 +20,10 @@ function fakeSpreadsheet(options = {}) {
             Array.from({ length: colCount }, (_, c) => (data[row - 1 + r] || [])[col - 1 + c] ?? ""));
         },
         setValues(values) {
+          if (options.dropSetWriteTab === name) {
+            options.dropSetWriteTab = "";
+            return; // simulate a storage adapter that returns without persisting
+          }
           if (options.failSetBeforeWriteTab === name) {
             options.failSetBeforeWriteTab = "";
             throw new Error("synthetic setValues failure before write");
@@ -44,6 +48,10 @@ function fakeSpreadsheet(options = {}) {
         return last;
       },
       appendRow(values) {
+        if (options.dropAppendWriteTab === name) {
+          options.dropAppendWriteTab = "";
+          return; // simulate a storage adapter that returns without persisting
+        }
         if (options.failAppendBeforeWriteTab === name) {
           options.failAppendBeforeWriteTab = "";
           throw new Error("synthetic append failure before write");
@@ -430,4 +438,38 @@ test("audit append failure does not fabricate failure after primary registration
   assert.equal(result.ok, true);
   assert.equal(result.durable, true);
   assert.equal(f.spreadsheet.getSheetByName("Registrations").getLastRow(), 2);
+});
+
+
+test("event completion does not report success when a write returns without persisting", () => {
+  const f = fixture();
+  const events = f.api.eventStore("ACCOUNT_A");
+  const claim = events.begin("silent-completion", "digest", "ORG_A");
+  f.options.dropSetWriteTab = "Events";
+  assert.throws(() => events.complete("silent-completion", "digest", "ORG_A", claim.claimToken, { ok: true }), /EVENT_COMPLETION_UNCERTAIN/);
+  assert.equal(events.begin("silent-completion", "digest", "ORG_A").status, "IN_PROGRESS");
+});
+
+test("registration linkage fails closed when a write returns without persisting", () => {
+  const f = fixture();
+  const events = f.api.eventStore("ACCOUNT_A");
+  const claim = events.begin("silent-link", "digest", "ORG_A");
+  const request = { organizationId: "ORG_A", registrationId: "silent-reg", operationId: "silent-op",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", locationDescription: "",
+    latitude: 0, longitude: 0 };
+  f.options.dropSetWriteTab = "Events";
+  assert.throws(() => events.linkRegistration("silent-link", "digest", "ORG_A", claim.claimToken, request), /REGISTRATION_LINK_UNCERTAIN/);
+});
+
+test("registration persistence verifies the stable identifier tuple after a silent append failure", () => {
+  const f = fixture();
+  const store = f.api.registrationStore();
+  const request = { organizationId: "ORG_A", registrationId: "silent-reg", operationId: "silent-op",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", latitude: 0, longitude: 0 };
+  f.options.dropAppendWriteTab = "Registrations";
+  const result = store.create(request);
+  assert.equal(result.ok, false);
+  assert.equal(result.durable, false);
+  assert.equal(result.code, "PERSISTENCE_UNCERTAIN");
+  assert.equal(f.spreadsheet.getSheetByName("Registrations").getLastRow(), 1);
 });

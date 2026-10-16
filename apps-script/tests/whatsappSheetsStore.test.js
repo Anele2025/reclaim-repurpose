@@ -50,6 +50,15 @@ function fakeSpreadsheet(options = {}) {
     }
     return {
       getRange: range,
+      getLastColumn() {
+        let last = 0;
+        data.forEach(row => {
+          if (row) row.forEach((value, index) => {
+            if (value !== "" && value !== null && value !== undefined) last = Math.max(last, index + 1);
+          });
+        });
+        return last;
+      },
       getLastRow() {
         let last = 0;
         data.forEach((row, index) => { if (row && row.some(value => value !== "" && value !== null && value !== undefined)) last = index + 1; });
@@ -517,4 +526,87 @@ test("registration creation can safely resolve a persisted write after read-back
   assert.equal(retry.durable, true);
   assert.equal(retry.replay, true);
   assert.equal(f.spreadsheet.getSheetByName("Registrations").getLastRow(), 2);
+});
+
+
+const LEGACY_EVENTS_HEADERS = ["schemaVersion", "scopeKey", "eventId", "digest", "status", "claimToken", "claimedAt", "leaseExpiresAt", "attempts", "createdAt", "updatedAt", "completedAt", "resultJson", "lastErrorCode"];
+
+function seedLegacyEvents(f, records = []) {
+  const tab = f.spreadsheet.getSheetByName("Events");
+  tab._data[0] = LEGACY_EVENTS_HEADERS.slice();
+  records.forEach(row => tab.appendRow(row));
+  return tab;
+}
+
+test("empty, exactly recognized version 1 Events schema migrates and is idempotent", () => {
+  const f = fixture();
+  const tab = seedLegacyEvents(f);
+  const result = f.api.migrateEventsSchema();
+  assert.equal(result.status, "MIGRATED");
+  assert.equal(result.schemaVersion, 2);
+  assert.equal(result.acknowledgementLost, false);
+  assert.deepEqual(tab._data[0], f.api.schema().Events);
+  assert.equal(tab.getLastRow(), 1);
+  assert.equal(f.api.migrateEventsSchema().status, "ALREADY_CURRENT");
+  assert.equal(tab.getLastRow(), 1);
+});
+
+test("non-empty version 1 Events schema is refused without mutating any legacy record", () => {
+  const f = fixture();
+  const legacyRow = [1, "ORG_A|ACCOUNT_A", "legacy-event", "digest-old", "COMPLETE", "old-token", 1, "", 1, 1, 2, 2, '{"ok":true}', ""];
+  const tab = seedLegacyEvents(f, [legacyRow]);
+  const before = JSON.stringify(tab._data);
+  const result = f.api.migrateEventsSchema();
+  assert.equal(result.status, "REFUSED");
+  assert.equal(result.code, "LEGACY_EVENT_ROWS_REQUIRE_MANUAL_REVIEW");
+  assert.equal(result.recordCount, 1);
+  assert.equal(JSON.stringify(tab._data), before);
+});
+
+test("malformed, duplicate, and unknown Events headers are refused without mutation", () => {
+  const f = fixture();
+  const tab = seedLegacyEvents(f);
+  tab._data[0][2] = "scopeKey";
+  const before = JSON.stringify(tab._data);
+  const duplicate = f.api.migrateEventsSchema();
+  assert.equal(duplicate.status, "REFUSED");
+  assert.equal(duplicate.code, "EVENT_SCHEMA_DUPLICATE_COLUMN");
+  assert.equal(JSON.stringify(tab._data), before);
+
+  tab._data[0] = LEGACY_EVENTS_HEADERS.slice();
+  tab._data[0][0] = "futureSchemaVersion";
+  const unknownBefore = JSON.stringify(tab._data);
+  assert.equal(f.api.migrateEventsSchema().status, "REFUSED");
+  assert.equal(JSON.stringify(tab._data), unknownBefore);
+});
+
+test("lost acknowledgement after persisted migration is resolved by schema read-back", () => {
+  const f = fixture();
+  const tab = seedLegacyEvents(f);
+  f.options.failSetAfterWriteTab = "Events";
+  const result = f.api.migrateEventsSchema();
+  assert.equal(result.status, "MIGRATED");
+  assert.equal(result.acknowledgementLost, true);
+  assert.deepEqual(tab._data[0], f.api.schema().Events);
+  assert.equal(tab.getLastRow(), 1);
+});
+
+test("pre-write migration failure leaves version 1 unchanged and safe retry can proceed", () => {
+  const f = fixture();
+  const tab = seedLegacyEvents(f);
+  f.options.failSetBeforeWriteTab = "Events";
+  const failed = f.api.migrateEventsSchema();
+  assert.equal(failed.status, "INCOMPLETE");
+  assert.equal(failed.retryable, true);
+  assert.deepEqual(tab._data[0], LEGACY_EVENTS_HEADERS);
+  assert.equal(f.api.migrateEventsSchema().status, "MIGRATED");
+});
+
+test("busy ScriptLock prevents migration and does not mutate the legacy schema", () => {
+  const f = fixture({ lockBusy: true, skipInitialize: true });
+  const tab = f.spreadsheet.insertSheet("Events");
+  tab.getRange(1, 1, 1, LEGACY_EVENTS_HEADERS.length).setValues([LEGACY_EVENTS_HEADERS]);
+  const before = JSON.stringify(tab._data);
+  assert.throws(() => f.api.migrateEventsSchema(), /STORE_LOCK_BUSY/);
+  assert.equal(JSON.stringify(tab._data), before);
 });

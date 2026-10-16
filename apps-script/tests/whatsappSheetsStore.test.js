@@ -16,10 +16,18 @@ function fakeSpreadsheet(options = {}) {
     function range(row, col, rowCount, colCount) {
       return {
         getValues() {
+          if (options.failNextReadTab === name) {
+            options.failNextReadTab = "";
+            throw new Error("synthetic read-back failure");
+          }
           return Array.from({ length: rowCount }, (_, r) =>
             Array.from({ length: colCount }, (_, c) => (data[row - 1 + r] || [])[col - 1 + c] ?? ""));
         },
         setValues(values) {
+          if (options.dropSetWriteTab === name) {
+            options.dropSetWriteTab = "";
+            return; // simulate a storage adapter that returns without persisting
+          }
           if (options.failSetBeforeWriteTab === name) {
             options.failSetBeforeWriteTab = "";
             throw new Error("synthetic setValues failure before write");
@@ -29,6 +37,10 @@ function fakeSpreadsheet(options = {}) {
             if (!data[index]) data[index] = [];
             valuesRow.forEach((value, c) => { data[index][col - 1 + c] = value; });
           });
+          if (options.failReadAfterSetTab === name) {
+            options.failReadAfterSetTab = "";
+            options.failNextReadTab = name;
+          }
           if (options.failSetAfterWriteTab === name) {
             options.failSetAfterWriteTab = "";
             throw new Error("synthetic acknowledgement lost after write");
@@ -44,7 +56,19 @@ function fakeSpreadsheet(options = {}) {
         return last;
       },
       appendRow(values) {
+        if (options.dropAppendWriteTab === name) {
+          options.dropAppendWriteTab = "";
+          return; // simulate a storage adapter that returns without persisting
+        }
+        if (options.failAppendBeforeWriteTab === name) {
+          options.failAppendBeforeWriteTab = "";
+          throw new Error("synthetic append failure before write");
+        }
         data.push(values.slice());
+        if (options.failReadAfterAppendTab === name) {
+          options.failReadAfterAppendTab = "";
+          options.failNextReadTab = name;
+        }
         if (options.failAppendAfterWriteTab === name) {
           options.failAppendAfterWriteTab = "";
           throw new Error("synthetic append acknowledgement lost after write");
@@ -63,19 +87,20 @@ function fixture(options = {}) {
   const spreadsheet = fakeSpreadsheet(options);
   let clock = 1_800_000_000_000;
   let id = 0;
-  const lock = { tryLock: () => !options.lockBusy, releaseLock: () => {} };
+  let lockReleases = 0;
+  const lock = { tryLock: () => !options.lockBusy, releaseLock: () => { lockReleases++; } };
   const api = context.ReclaimWhatsAppSheetsStore.create({
     spreadsheet,
     lockService: { getScriptLock: () => lock },
     now: () => clock,
     digest: value => "sha256:" + value,
-    idGenerator: prefix => prefix + "-" + (++id),
+    idGenerator: options.idGenerator || (prefix => prefix + "-" + (++id)),
     lockTimeoutMs: 50,
     claimLeaseMs: 100,
     batchLimit: 3
   });
   if (!options.skipInitialize) api.initialize();
-  return { api, spreadsheet, options, advance: ms => { clock += ms; } };
+  return { api, spreadsheet, options, lock, lockReleases: () => lockReleases, advance: ms => { clock += ms; } };
 }
 const event = (store, id = "event-1", digest = "digest", org = "ORG_A") => store.eventStore("ACCOUNT_A").begin(id, digest, org);
 
@@ -293,4 +318,203 @@ test("reconciliation quarantines linked claims when the registration row is abse
   assert.equal(result.quarantinedExpiredClaims, 1);
   assert.equal(events.begin("recover-missing", "digest-m", "ORG_A").code, "RECONCILIATION_REQUIRED");
   assert.throws(() => events.release("recover-missing", "digest-m", "ORG_A", claim.claimToken, "STALE"), /STALE_CLAIM_TOKEN/);
+});
+
+
+test("claim generations fence stale workers even when the injected token source collides", () => {
+  const f = fixture({ idGenerator: () => "constant-token" });
+  const events = f.api.eventStore("ACCOUNT_A");
+  const first = events.begin("collision-event", "digest", "ORG_A");
+  events.release("collision-event", "digest", "ORG_A", first.claimToken, "RETRY");
+  const second = events.begin("collision-event", "digest", "ORG_A");
+  assert.notEqual(second.claimToken, first.claimToken);
+  assert.throws(() => events.complete("collision-event", "digest", "ORG_A", first.claimToken, { ok: true }), /STALE_CLAIM_TOKEN/);
+  assert.equal(events.complete("collision-event", "digest", "ORG_A", second.claimToken, { ok: true }).ok, true);
+});
+
+test("event completion refuses a non-success result", () => {
+  const f = fixture();
+  const events = f.api.eventStore("ACCOUNT_A");
+  const claim = events.begin("false-result", "digest", "ORG_A");
+  assert.throws(() => events.complete("false-result", "digest", "ORG_A", claim.claimToken, { ok: false }), /EVENT_RESULT_INVALID/);
+  assert.equal(events.begin("false-result", "digest", "ORG_A").status, "IN_PROGRESS");
+});
+
+test("registration IDs and operation IDs cannot be reused across tenants", () => {
+  const f = fixture();
+  const store = f.api.registrationStore();
+  const original = { organizationId: "ORG_A", registrationId: "global-reg", operationId: "global-op",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", latitude: 0, longitude: 0 };
+  assert.equal(store.create(original).ok, true);
+  const reusedRegistration = store.create({ ...original, organizationId: "ORG_B", operationId: "other-op" });
+  assert.equal(reusedRegistration.ok, false);
+  assert.equal(reusedRegistration.code, "IDEMPOTENCY_CONFLICT");
+  const reusedOperation = store.create({ ...original, organizationId: "ORG_B", registrationId: "other-reg" });
+  assert.equal(reusedOperation.ok, false);
+  assert.equal(reusedOperation.code, "IDEMPOTENCY_CONFLICT");
+  assert.equal(f.spreadsheet.getSheetByName("Registrations").getLastRow(), 2);
+});
+
+test("reconciliation treats cross-tenant identifier collisions as contradictory evidence", () => {
+  const f = fixture();
+  const eventsA = f.api.eventStore("ACCOUNT_A");
+  const claim = eventsA.begin("cross-tenant-recovery", "digest", "ORG_A");
+  const request = { organizationId: "ORG_A", registrationId: "shared-reg", operationId: "shared-op",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", locationDescription: "",
+    latitude: 0, longitude: 0 };
+  eventsA.linkRegistration("cross-tenant-recovery", "digest", "ORG_A", claim.claimToken, request);
+  const otherTenant = { ...request, organizationId: "ORG_B" };
+  // Create a conflicting row under another tenant by seeding the fake sheet,
+  // representing a writer that bypassed this adapter's cooperative lock.
+  const tab = f.spreadsheet.getSheetByName("Registrations");
+  tab.appendRow([2, "ORG_B", "shared-reg", "shared-op", "different-fingerprint", JSON.stringify(otherTenant), "SUCCEEDED", 1, 1]);
+  f.advance(101);
+  const result = f.api.reconcile({ limit: 1 });
+  assert.equal(result.quarantinedExpiredClaims, 1);
+  assert.equal(eventsA.begin("cross-tenant-recovery", "digest", "ORG_A").code, "RECONCILIATION_REQUIRED");
+});
+
+
+test("missing, empty, wrong-event, and wrong-tenant claim tokens fail closed", () => {
+  const f = fixture();
+  const eventsA = f.api.eventStore("ACCOUNT_A");
+  const eventsB = f.api.eventStore("ACCOUNT_B");
+  const one = eventsA.begin("token-event-a", "digest-a", "ORG_A");
+  const two = eventsA.begin("token-event-b", "digest-b", "ORG_A");
+  assert.throws(() => eventsA.complete("token-event-a", "digest-a", "ORG_A", "", { ok: true }), /STALE_CLAIM_TOKEN/);
+  assert.throws(() => eventsA.complete("token-event-a", "digest-a", "ORG_A", undefined, { ok: true }), /STALE_CLAIM_TOKEN/);
+  assert.throws(() => eventsA.complete("token-event-a", "digest-a", "ORG_A", two.claimToken, { ok: true }), /STALE_CLAIM_TOKEN/);
+  assert.throws(() => eventsB.complete("token-event-a", "digest-a", "ORG_A", one.claimToken, { ok: true }), /EVENT_CLAIM_MISMATCH/);
+  assert.equal(eventsA.begin("token-event-a", "digest-a", "ORG_A").status, "IN_PROGRESS");
+});
+
+test("registration ID reuse with changed payload is rejected without adding a row", () => {
+  const f = fixture();
+  const store = f.api.registrationStore();
+  const original = { organizationId: "ORG_A", registrationId: "stable-reg", operationId: "stable-op",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", latitude: 0, longitude: 0 };
+  assert.equal(store.create(original).ok, true);
+  const changed = store.create({ ...original, customerName: "Different Synthetic Customer" });
+  assert.equal(changed.ok, false);
+  assert.equal(changed.code, "IDEMPOTENCY_CONFLICT");
+  assert.equal(f.spreadsheet.getSheetByName("Registrations").getLastRow(), 2);
+});
+
+test("duplicate registration rows are never accepted as durable success", () => {
+  const f = fixture();
+  const store = f.api.registrationStore();
+  const request = { organizationId: "ORG_A", registrationId: "dup-reg", operationId: "dup-op",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", latitude: 0, longitude: 0 };
+  assert.equal(store.create(request).ok, true);
+  const row = f.spreadsheet.getSheetByName("Registrations")._data[1].slice();
+  f.spreadsheet.getSheetByName("Registrations").appendRow(row);
+  const retry = store.create(request);
+  assert.equal(retry.ok, false);
+  assert.equal(retry.durable, false);
+  assert.equal(retry.code, "REGISTRATION_DUPLICATE_ROWS");
+});
+
+test("repeated reconciliation remains bounded and does not re-create registrations", () => {
+  const f = fixture();
+  const events = f.api.eventStore("ACCOUNT_A");
+  const claim = events.begin("repeat-reconcile", "digest", "ORG_A");
+  const request = { organizationId: "ORG_A", registrationId: "repeat-reg", operationId: "repeat-op",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", locationDescription: "",
+    latitude: 0, longitude: 0 };
+  events.linkRegistration("repeat-reconcile", "digest", "ORG_A", claim.claimToken, request);
+  f.api.registrationStore().create(request);
+  f.advance(101);
+  const first = f.api.reconcile({ limit: 1 });
+  const countAfterFirst = f.spreadsheet.getSheetByName("Registrations").getLastRow();
+  const second = f.api.reconcile({ limit: 1 });
+  assert.equal(first.quarantinedExpiredClaims, 0);
+  assert.equal(second.inspected, 1); // no event candidate; one registration row inspected for duplicate-operation review
+  assert.equal(f.spreadsheet.getSheetByName("Registrations").getLastRow(), countAfterFirst);
+  assert.equal(events.begin("repeat-reconcile", "digest", "ORG_A").status, "REPLAY");
+});
+
+test("adapter releases ScriptLock when a guarded operation throws", () => {
+  const f = fixture();
+  const before = f.lockReleases();
+  assert.throws(() => f.api.eventStore("ACCOUNT_A").complete("missing", "digest", "ORG_A", "token", { ok: true }), /EVENT_CLAIM_MISMATCH/);
+  assert.equal(f.lockReleases(), before + 1);
+});
+
+test("audit append failure does not fabricate failure after primary registration is verified", () => {
+  const f = fixture();
+  const store = f.api.registrationStore();
+  const request = { organizationId: "ORG_A", registrationId: "audit-reg", operationId: "audit-op",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", latitude: 0, longitude: 0 };
+  f.options.failAppendBeforeWriteTab = "Audit";
+  const result = store.create(request);
+  assert.equal(result.ok, true);
+  assert.equal(result.durable, true);
+  assert.equal(f.spreadsheet.getSheetByName("Registrations").getLastRow(), 2);
+});
+
+
+test("event completion does not report success when a write returns without persisting", () => {
+  const f = fixture();
+  const events = f.api.eventStore("ACCOUNT_A");
+  const claim = events.begin("silent-completion", "digest", "ORG_A");
+  f.options.dropSetWriteTab = "Events";
+  assert.throws(() => events.complete("silent-completion", "digest", "ORG_A", claim.claimToken, { ok: true }), /EVENT_COMPLETION_UNCERTAIN/);
+  assert.equal(events.begin("silent-completion", "digest", "ORG_A").status, "IN_PROGRESS");
+});
+
+test("registration linkage fails closed when a write returns without persisting", () => {
+  const f = fixture();
+  const events = f.api.eventStore("ACCOUNT_A");
+  const claim = events.begin("silent-link", "digest", "ORG_A");
+  const request = { organizationId: "ORG_A", registrationId: "silent-reg", operationId: "silent-op",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", locationDescription: "",
+    latitude: 0, longitude: 0 };
+  f.options.dropSetWriteTab = "Events";
+  assert.throws(() => events.linkRegistration("silent-link", "digest", "ORG_A", claim.claimToken, request), /REGISTRATION_LINK_UNCERTAIN/);
+});
+
+test("registration persistence verifies the stable identifier tuple after a silent append failure", () => {
+  const f = fixture();
+  const store = f.api.registrationStore();
+  const request = { organizationId: "ORG_A", registrationId: "silent-reg", operationId: "silent-op",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", latitude: 0, longitude: 0 };
+  f.options.dropAppendWriteTab = "Registrations";
+  const result = store.create(request);
+  assert.equal(result.ok, false);
+  assert.equal(result.durable, false);
+  assert.equal(result.code, "PERSISTENCE_UNCERTAIN");
+  assert.equal(f.spreadsheet.getSheetByName("Registrations").getLastRow(), 1);
+});
+
+
+test("registration linkage reports uncertainty when the post-write read-back fails", () => {
+  const f = fixture();
+  const events = f.api.eventStore("ACCOUNT_A");
+  const claim = events.begin("readback-link", "digest", "ORG_A");
+  const request = { organizationId: "ORG_A", registrationId: "readback-reg", operationId: "readback-op",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", locationDescription: "",
+    latitude: 0, longitude: 0 };
+  f.options.failReadAfterSetTab = "Events";
+  assert.throws(() => events.linkRegistration("readback-link", "digest", "ORG_A", claim.claimToken, request), /synthetic read-back failure/);
+  const retry = events.linkRegistration("readback-link", "digest", "ORG_A", claim.claimToken, request);
+  assert.equal(retry.ok, true);
+  assert.equal(retry.durable, true);
+  assert.equal(retry.replay, true);
+});
+
+test("registration creation can safely resolve a persisted write after read-back failure", () => {
+  const f = fixture();
+  const store = f.api.registrationStore();
+  const request = { organizationId: "ORG_A", registrationId: "readback-reg", operationId: "readback-op",
+    customerName: "Synthetic Customer", customerPhone: "synthetic-sender", latitude: 0, longitude: 0 };
+  f.options.failReadAfterAppendTab = "Registrations";
+  const uncertain = store.create(request);
+  assert.equal(uncertain.ok, false);
+  assert.equal(uncertain.durable, false);
+  assert.equal(uncertain.retryable, true);
+  const retry = store.create(request);
+  assert.equal(retry.ok, true);
+  assert.equal(retry.durable, true);
+  assert.equal(retry.replay, true);
+  assert.equal(f.spreadsheet.getSheetByName("Registrations").getLastRow(), 2);
 });

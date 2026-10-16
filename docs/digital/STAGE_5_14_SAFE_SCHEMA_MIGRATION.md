@@ -127,7 +127,12 @@ These tests use a synthetic spreadsheet adapter. They do not prove real Google S
 
 ## Validation evidence
 
-Validation is **pending at report authoring time**. The implementation must not be treated as done until the actual GitHub Actions runs for the implementation head are inspected. Required checks are the existing Stage 5 validation, security-evidence validation, JavaScript test suite, Python packaging tests, deterministic package generation/content checks, generated JavaScript syntax check, and Stage 4 validation.
+The following actual GitHub Actions runs completed successfully for the implementation/test head `6bbf118365908ebc3b368916ec3f88032b1a931d`:
+
+- [Stage 5 validation #38834615673](https://github.com/Anele2025/reclaim-repurpose/actions/runs/38834615673): **success** — 148 JavaScript tests passed, 0 failed; 4 Python packaging tests passed; deterministic Apps Script package build, generated-package checks, generated JavaScript syntax check, and Stage 4 validation passed.
+- [Security Evidence Validation #38834617019](https://github.com/Anele2025/reclaim-repurpose/actions/runs/38834617019): **success** — evidence-validator and adversarial evidence-gate tests, all 148 JavaScript tests, 4 Python packaging tests, deterministic package build, syntax check, Stage 4 validation, and explicit live-gate limitation check passed.
+
+These results verify repository tests for the code/test commit above. A subsequent report-only commit changes documentation, not implementation logic; its own Actions runs must still be checked before claiming the final PR head's checks are green.
 
 No Google Sheet was accessed. No Apps Script was deployed. No WhatsApp provider was contacted. No real participant data or production credentials were used.
 

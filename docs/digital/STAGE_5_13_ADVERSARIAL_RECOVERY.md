@@ -31,6 +31,10 @@ Registration matching now searches all rows for either stable identifier, then t
 
 The event adapter previously allowed a caller to mark an event complete with an arbitrary result object. It now requires an object whose `ok` property is exactly `true` before completion. The registration workflow already checks durable registration success before reporting `REGISTERED`; this adds a defensive store-level invariant.
 
+### 4. Successful write calls were not consistently verified by read-back
+
+The prior completion path returned success immediately after a normal write call. It now re-reads the event and verifies the tenant, digest, completion status, active claim token, exact serialized result, and completion timestamp before returning success. Registration linkage revalidates the tenant, digest, processing status, token, IDs, and fingerprint. Registration persistence read-back also checks the explicit organization, registration ID, and operation ID instead of relying only on the fingerprint and status. These checks make silent/no-op fake writes fail closed; they do not make Sheets transactional.
+
 ## Tests added
 
 Added deterministic regression tests to `apps-script/tests/whatsappSheetsStore.test.js` for:
@@ -41,6 +45,8 @@ Added deterministic regression tests to `apps-script/tests/whatsappSheetsStore.t
 - registration-ID reuse across organizations;
 - operation-ID reuse across organizations;
 - cross-tenant identifier collisions during reconciliation.
+
+Additional tests cover missing/empty/wrong-event/wrong-scope claim tokens, changed payload under a reused registration ID, duplicate registration rows, repeated bounded reconciliation, lock release after a thrown operation, best-effort audit failure, and silent/no-op writes at event completion, registration linkage, and registration append boundaries.
 
 The fake-spreadsheet fixture remains synthetic. A seeded conflicting row models a writer bypassing this adapter; it does not claim to simulate all real Google Sheets races.
 
@@ -56,11 +62,11 @@ The fake-spreadsheet fixture remains synthetic. A seeded conflicting row models 
 
 ## Validation status
 
-**Automated repository validation passed for implementation commit `35a0de577b76a2ea1cef0550badbce0f8664895a`.**
+**Automated repository validation passed for implementation commit `9eda0ce11f374ce09a0fd0698e36e8e4071b1a7f`.**
 
-- [Stage 5 validation #38826720751](https://github.com/Anele2025/reclaim-repurpose/actions/runs/38826720751): **success** — 131 JavaScript tests passed, 0 failed; 4 Python package tests passed; deterministic package build, generated-package content checks, generated JavaScript syntax check, and Stage 4 validation passed.
-- [Security Evidence Validation #38826720762](https://github.com/Anele2025/reclaim-repurpose/actions/runs/38826720762): **success** — evidence-validator tests, adversarial evidence-gate tests, all 131 JavaScript tests, 4 Python package tests, deterministic package build, generated syntax check, and Stage 4 validation passed.
-- The run logs confirm both workflows completed successfully for the Stage 5.13 pull-request head at that time. The report-only evidence update may advance the branch head; inspect the latest PR head and Actions runs before treating that newer commit as verified.
+- [Stage 5 validation #38827204298](https://github.com/Anele2025/reclaim-repurpose/actions/runs/38827204298): **success** — 140 JavaScript tests passed, 0 failed; 4 Python package tests passed; deterministic package build, generated-package content checks, generated JavaScript syntax check, and Stage 4 validation passed.
+- [Security Evidence Validation #38827204277](https://github.com/Anele2025/reclaim-repurpose/actions/runs/38827204277): **success** — evidence-validator tests, adversarial evidence-gate tests, all 140 JavaScript tests, 4 Python package tests, deterministic package build, generated syntax check, and Stage 4 validation passed.
+- Both workflows completed successfully for implementation commit `9eda0ce11f374ce09a0fd0698e36e8e4071b1a7f`. A documentation-only update to this report will advance the branch head; the pull request's latest head and its own runs must still be checked separately.
 - These are repository/fixture checks only. They do not prove real Google Sheets concurrency, transactional behavior, exactly-once processing, live integration, or deployment.
 
 ## Limitations and non-goals

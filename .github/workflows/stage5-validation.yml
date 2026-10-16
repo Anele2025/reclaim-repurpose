@@ -20,6 +20,7 @@ on:
       - stage-5-11-durable-sheets-recovery
       - stage-5-12-claim-fencing-recovery
       - stage-5-13-adversarial-recovery
+      - stage-5-14-safe-schema-migration
 
 jobs:
   pure-validation:

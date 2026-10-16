@@ -369,6 +369,70 @@ var ReclaimWhatsAppSheetsStore = (function () {
         }
       };
     }
+    // Version 1 Events rows lack organizationId and durable registration linkage.
+    // Those fields cannot be reconstructed safely from scopeKey or event status.
+    // Automatic migration is therefore limited to an empty, exactly recognized v1 sheet.
+    function migrateEventsSchema() {
+      return withLock(function () {
+        var target = deps.spreadsheet.getSheetByName("Events");
+        if (!target) return { status: "REFUSED", code: "SHEET_MISSING_EVENTS" };
+        var lastColumn = typeof target.getLastColumn === "function" ? target.getLastColumn() : 0;
+        var lastRow = target.getLastRow();
+        if (lastColumn < 1) return { status: "REFUSED", code: "EVENT_SCHEMA_MARKER_MISSING" };
+        var actual = target.getRange(1, 1, 1, lastColumn).getValues()[0];
+        var seen = {};
+        for (var i = 0; i < actual.length; i++) {
+          var name = actual[i];
+          if (name !== "" && name !== null && name !== undefined) {
+            if (seen[String(name)]) return { status: "REFUSED", code: "EVENT_SCHEMA_DUPLICATE_COLUMN" };
+            seen[String(name)] = true;
+          }
+        }
+        function sameHeaders(a, b) {
+          return a.length === b.length && a.every(function (value, index) { return value === b[index]; });
+        }
+        var legacyHeaders = ["schemaVersion", "scopeKey", "eventId", "digest", "status", "claimToken", "claimedAt", "leaseExpiresAt", "attempts", "createdAt", "updatedAt", "completedAt", "resultJson", "lastErrorCode"];
+        if (sameHeaders(actual, HEADERS.Events)) {
+          return { status: "ALREADY_CURRENT", schemaVersion: VERSION, recordCount: Math.max(0, lastRow - 1) };
+        }
+        if (!sameHeaders(actual, legacyHeaders)) {
+          var first = actual[0];
+          return { status: "REFUSED", code: first === "schemaVersion" ? "EVENT_SCHEMA_UNSUPPORTED_OR_MALFORMED" : "EVENT_SCHEMA_MARKER_MISSING" };
+        }
+        if (lastRow > 1) {
+          return { status: "REFUSED", code: "LEGACY_EVENT_ROWS_REQUIRE_MANUAL_REVIEW", recordCount: lastRow - 1 };
+        }
+        // No event records exist, so the only mutation is a single header-row write.
+        // Read-back, not the write acknowledgement, decides whether it committed.
+        try {
+          target.getRange(1, 1, 1, HEADERS.Events.length).setValues([HEADERS.Events]);
+        } catch (writeError) {
+          try {
+            var afterErrorColumns = target.getLastColumn();
+            var afterError = afterErrorColumns ? target.getRange(1, 1, 1, afterErrorColumns).getValues()[0] : [];
+            if (sameHeaders(afterError, HEADERS.Events) && target.getLastRow() <= 1) {
+              return { status: "MIGRATED", schemaVersion: VERSION, acknowledgementLost: true };
+            }
+            if (sameHeaders(afterError, legacyHeaders) && target.getLastRow() <= 1) {
+              return { status: "INCOMPLETE", code: "MIGRATION_WRITE_UNCONFIRMED", retryable: true };
+            }
+            return { status: "RECONCILIATION_REQUIRED", code: "MIGRATION_PARTIAL_SCHEMA" };
+          } catch (readError) {
+            return { status: "RECONCILIATION_REQUIRED", code: "MIGRATION_READBACK_FAILED" };
+          }
+        }
+        try {
+          var verifyColumns = target.getLastColumn();
+          var verify = verifyColumns ? target.getRange(1, 1, 1, verifyColumns).getValues()[0] : [];
+          if (sameHeaders(verify, HEADERS.Events) && target.getLastRow() <= 1) {
+            return { status: "MIGRATED", schemaVersion: VERSION, acknowledgementLost: false };
+          }
+          return { status: "RECONCILIATION_REQUIRED", code: "MIGRATION_READBACK_MISMATCH" };
+        } catch (verifyError) {
+          return { status: "RECONCILIATION_REQUIRED", code: "MIGRATION_READBACK_FAILED" };
+        }
+      });
+    }
     function initialize() {
       return withLock(function () {
         Object.keys(HEADERS).forEach(function (name) {
@@ -438,7 +502,7 @@ var ReclaimWhatsAppSheetsStore = (function () {
         return { ok: true, inspected: inspected, quarantinedExpiredClaims: quarantined, manualReview: review, limit: limit };
       });
     }
-    return Object.freeze({ initialize: initialize, eventStore: eventStore,
+    return Object.freeze({ initialize: initialize, migrateEventsSchema: migrateEventsSchema, eventStore: eventStore,
       sessionStore: sessionStore, registrationStore: registrationStore, reconcile: reconcile,
       schema: function () { return JSON.parse(JSON.stringify(HEADERS)); } });
   }

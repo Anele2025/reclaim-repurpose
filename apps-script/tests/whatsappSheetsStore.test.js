@@ -44,6 +44,10 @@ function fakeSpreadsheet(options = {}) {
         return last;
       },
       appendRow(values) {
+        if (options.failAppendBeforeWriteTab === name) {
+          options.failAppendBeforeWriteTab = "";
+          throw new Error("synthetic append failure before write");
+        }
         data.push(values.slice());
         if (options.failAppendAfterWriteTab === name) {
           options.failAppendAfterWriteTab = "";
